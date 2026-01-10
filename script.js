@@ -3,34 +3,15 @@ const MAX_KANJI_PER_PART_DEFAULT = 45;
 const TARGET_PARTS_JLPT_N1 = 9;
 const NUM_QUIZ_OPTIONS = 6;
 
-// Configuración de dificultad
-const KOTOBA_KANJI_MAX_DIFFICULTY = {
-    5: [6, 1, 10],
-    4: [8, 2, 15],
-    3: [10, 4, 20],
-    2: [12, 6, 24],
-    1: [14, 8, 28],
-};
-
-const CONFUSING_MEANINGS_BLACKLIST = new Set([
-    'Turkey', 'U.S.A.', 'USA', 'America', 'United States', 'Great Britain',
-    'England', 'UK', 'U.K.', 'France', 'Germany', 'Italy', 'Russia',
-    'Spain', 'Portugal', 'Holland', 'Netherlands', 'Belgium', 'India',
-    'metre', 'gram', 'litre', 'liter', 'watt', 'page'
-]);
-
+// Configuración de dificultad (Solo para referencia visual de niveles)
 const JLPT_LEVEL_COLORS = {
     'jlpt5': 'btn-success', 'jlpt4': 'btn-info', 'jlpt3': 'btn-warning text-dark',
     'jlpt2': 'btn-danger', 'jlpt1': 'btn-secondary',
 };
 
-// --- Funciones de Utilidad (Helpers) ---
-
+// --- Helpers ---
 function kata2hira(str) {
-    return str.replace(/[\u30a1-\u30f6]/g, function(match) {
-        var chr = match.charCodeAt(0) - 0x60;
-        return String.fromCharCode(chr);
-    });
+    return str.replace(/[\u30a1-\u30f6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
 }
 
 function shuffleArray(array) {
@@ -45,408 +26,361 @@ function getOkuriganaEnding(word) {
     if (!word) return "";
     let ending = "";
     for (let i = word.length - 1; i >= 0; i--) {
-        const charCode = word.charCodeAt(i);
-        if (charCode >= 0x3041 && charCode <= 0x3096) {
-            ending = word[i] + ending;
-        } else {
-            break;
-        }
+        if (word.charCodeAt(i) >= 0x3041 && word.charCodeAt(i) <= 0x3096) ending = word[i] + ending;
+        else break;
     }
     return ending;
 }
 
 function cleanReadings(readings) {
     if (!readings) return [];
-    const unique = new Set();
-    readings.forEach(r => {
-        if (!r) return;
-        let clean = r.replace(/^-|-$/g, '');
-        if (clean) unique.add(clean);
-    });
-    return Array.from(unique).sort();
+    return [...new Set(readings.map(r => r ? r.replace(/^-|-$/g, '') : '').filter(Boolean))].sort();
 }
 
-// --- Vue App ---
+// Función de pausa para liberar el hilo principal (evita que el navegador se congele)
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 new Vue({
     el: '#app',
     data: {
         loadingData: true,
+        loadingMessage: "Iniciando...",
         jsonLoadError: null,
         
-        // Base de datos en memoria
         allKanjiData: {}, 
         allWordsData: {}, 
         vocabByLevelCache: {}, 
         
-        // Estado UI (Dark mode es automático por CSS ahora)
         selectedLevel: null,
         quizMode: 'kanji',
-        availableParts: [],
-
-        // Estado del Quiz
+        availablePartsRaw: [],
+        
         quizQueue: [], 
         currentQuestion: null, 
         options: [],
         
-        // Progreso
         currentItemOrderIndex: 0,
         totalItemsInLevel: 0,
         
-        // Interacción
         isLoading: false,
-        answeredCorrectly: false,
-        incorrectlySelectedOptions: []
+        showImmediateCorrectFeedback: false, 
+        incorrectlySelectedOptions: [],
+        
+        completedSessionItems: new Set(),
+        correctCount: 0,
+        wrongCount: 0
     },
     computed: {
-        currentDisplayChar() {
-            if (!this.currentQuestion) return '';
-            return this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
+        orderedGroupedParts() {
+            const groups = {};
+            this.availablePartsRaw.forEach(part => {
+                const lvl = part.originalLevel.replace('jlpt', '');
+                if (!groups[lvl]) {
+                    groups[lvl] = { levelKey: lvl, displayName: lvl, parts: [] };
+                }
+                groups[lvl].parts.push(part);
+            });
+            return Object.values(groups).sort((a, b) => b.levelKey - a.levelKey);
         },
-        currentMeaning() {
-            if (!this.currentQuestion) return '';
-            return this.currentQuestion.meaning;
+        kanjiListForLevel() {
+            if (!this.selectedLevel) return [];
+            return this.selectedLevel.kanjiList;
+        },
+        kotobaListForLevel() {
+            if (!this.selectedLevel) return [];
+            return this.selectedLevel.fullVocabPart;
         },
         currentCorrectContextualReading() {
+            return this.currentQuestion ? this.currentQuestion.correct_contextual_reading : '';
+        },
+        currentMeaning() {
+            return this.currentQuestion ? this.currentQuestion.meaning : '';
+        },
+        currentJapaneseMeaningKanjiForm() {
             if (!this.currentQuestion) return '';
-            return this.currentQuestion.correct_contextual_reading || '';
+            if (this.quizMode === 'kotoba') return '';
+            return this.currentQuestion.kanji;
         },
         progressPercentage() {
             if (this.totalItemsInLevel === 0) return 0;
             return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
+        },
+        levelTrulyCompleted() {
+            return this.currentItemOrderIndex >= this.totalItemsInLevel - 1 && this.showImmediateCorrectFeedback;
+        },
+        winLossRatio() {
+            const total = this.correctCount + this.wrongCount;
+            return total === 0 ? 0 : Math.round((this.correctCount / total) * 100);
+        },
+        winLossColor() {
+            if (this.winLossRatio >= 80) return 'text-success';
+            if (this.winLossRatio >= 50) return 'text-warning';
+            return 'text-danger';
         }
     },
     created() {
-        this.initTheme();
         this.loadData();
     },
     methods: {
-        // Lógica de tema idéntica a Python App (Bootstrap nativo)
-        initTheme() {
-            const updateTheme = () => {
-                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                document.documentElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
-            };
-            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateTheme);
-            updateTheme(); // Ejecutar al inicio
-        },
-
         async loadData() {
             this.loadingData = true;
             this.jsonLoadError = null;
+
             try {
+                this.loadingMessage = "Descargando diccionario...";
                 const response = await fetch('kanjiapi_small.json');
-                if (!response.ok) throw new Error("No se pudo cargar 'kanjiapi_small.json' (Estado: " + response.status + ")");
+                if (!response.ok) throw new Error("Error HTTP: " + response.status);
                 
+                this.loadingMessage = "Leyendo datos...";
+                // Permitir que la UI se actualice antes de parsear el JSON grande
+                await sleep(50);
                 const data = await response.json();
+                
                 this.allKanjiData = data.kanjis || {};
                 this.allWordsData = data.words || {};
                 
-                this.preloadVocabulary();
-                this.generatePartsList();
-                
+                // Ejecutamos las funciones pesadas con await para respetar los tiempos de carga
+                await this.preloadVocabulary();
+                await this.generatePartsList();
+
                 this.loadingData = false;
             } catch (e) {
                 console.error(e);
-                this.jsonLoadError = "Error cargando datos: " + e.message;
+                this.jsonLoadError = e.message;
                 this.loadingData = false;
             }
         },
 
-        retryLoad() {
-            this.loadData();
-        },
-
-        preloadVocabulary() {
+        async preloadVocabulary() {
             const levels = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}};
             const uniqueSet = new Set();
+            
+            // Obtenemos todas las claves para poder iterar con índice
+            const wordKeys = Object.keys(this.allWordsData);
+            const total = wordKeys.length;
+            const batchSize = 2000; // Procesar de a 2000 palabras
 
-            for (const key in this.allWordsData) {
+            for (let i = 0; i < total; i++) {
+                // Cada batchSize iteraciones, actualizamos UI y descansamos 10ms
+                if (i % batchSize === 0) {
+                    this.loadingMessage = `Analizando palabras... ${Math.round((i / total) * 100)}%`;
+                    await sleep(10);
+                }
+
+                const key = wordKeys[i];
                 const entries = this.allWordsData[key];
                 if (!Array.isArray(entries)) continue;
 
-                entries.forEach(entry => {
-                    const variants = entry.variants || [];
-                    const meanings = entry.meanings || [];
-                    if (variants.length === 0 || meanings.length === 0) return;
-
-                    const word = variants[0].written;
-                    const reading = variants[0].pronounced;
+                for (const entry of entries) {
+                    const word = entry.variants[0].written;
+                    const reading = entry.variants[0].pronounced;
                     
-                    let minLevel = null; 
-                    let isValid = true;
-                    
+                    let minLevel = null;
+                    // Bucle corto (largo de palabra), no afecta mucho
                     for (const char of word) {
                         if (char >= '\u4e00' && char <= '\u9faf') {
                             const kData = this.allKanjiData[char];
-                            if (!kData || !kData.jlpt) {
-                                isValid = false; break;
-                            }
-                            if (minLevel === null || kData.jlpt < minLevel) {
-                                minLevel = kData.jlpt;
+                            if (kData && kData.jlpt) {
+                                if (minLevel === null || kData.jlpt < minLevel) minLevel = kData.jlpt;
                             }
                         }
                     }
+                    if (minLevel === null) continue;
 
-                    if (!isValid || minLevel === null) return;
-                    
-                    const firstGloss = meanings[0].glosses ? meanings[0].glosses[0] : '';
-                    const uniqueKey = `${word}|${reading}|${firstGloss}`;
-                    
-                    if (uniqueSet.has(uniqueKey)) return;
+                    const uniqueKey = `${word}|${reading}`;
+                    if (uniqueSet.has(uniqueKey)) continue;
                     uniqueSet.add(uniqueKey);
 
                     const ending = getOkuriganaEnding(word);
                     if (!levels[minLevel][ending]) levels[minLevel][ending] = [];
-                    
                     levels[minLevel][ending].push({
-                        word: word,
-                        reading: reading,
-                        meanings: meanings
+                        word, reading, meanings: entry.meanings
                     });
-                });
+                }
             }
             this.vocabByLevelCache = levels;
         },
 
-        generatePartsList() {
+        async generatePartsList() {
+            this.loadingMessage = "Generando niveles...";
+            await sleep(50);
+
             const parts = [];
-            ['jlpt5', 'jlpt4', 'jlpt3', 'jlpt2', 'jlpt1'].forEach(lvlStr => {
+            const levels = ['jlpt5', 'jlpt4', 'jlpt3', 'jlpt2', 'jlpt1'];
+
+            for (const lvlStr of levels) {
                 const lvlNum = parseInt(lvlStr.replace('jlpt', ''));
                 
-                const kanjisInLevel = Object.keys(this.allKanjiData).filter(k => 
-                    this.allKanjiData[k].jlpt === lvlNum
-                ).sort();
+                // Obtener Kanjis
+                const kanjisInLevel = Object.keys(this.allKanjiData)
+                    .filter(k => this.allKanjiData[k].jlpt === lvlNum)
+                    .sort();
 
-                if (kanjisInLevel.length === 0) return;
+                if (kanjisInLevel.length === 0) continue;
 
                 let kpp = MAX_KANJI_PER_PART_DEFAULT;
-                if (lvlStr === 'jlpt1') {
-                    kpp = Math.max(1, Math.ceil(kanjisInLevel.length / TARGET_PARTS_JLPT_N1));
-                }
+                if (lvlStr === 'jlpt1') kpp = Math.max(1, Math.ceil(kanjisInLevel.length / TARGET_PARTS_JLPT_N1));
                 
                 const numParts = Math.ceil(kanjisInLevel.length / kpp);
                 
-                let vocabCount = 0;
+                // --- Optimización Crítica aquí ---
+                // En lugar de recalcular filtros, usamos el cache directo
                 const vocabGroups = this.vocabByLevelCache[lvlNum] || {};
-                const flatVocab = [];
-                Object.values(vocabGroups).forEach(group => {
-                    if (group.length >= NUM_QUIZ_OPTIONS) {
-                        flatVocab.push(...group);
-                    }
+                let validVocab = [];
+                
+                // Aplanamos solo una vez por nivel
+                const allWordsInLevel = Object.values(vocabGroups).flat();
+                
+                // Filtramos palabras que tengan suficientes distractores
+                // IMPORTANTE: Ahora miramos el tamaño del grupo en vocabGroups, es O(1)
+                validVocab = allWordsInLevel.filter(w => {
+                    const ending = getOkuriganaEnding(w.word);
+                    const group = vocabGroups[ending];
+                    // Simplemente chequeamos si el grupo tiene suficientes palabras
+                    // con longitud de lectura similar. Esto es mucho más rápido.
+                    // (Aproximación: si el grupo tiene >= 6 items, asumimos que es viable.
+                    //  Para precisión total, habría que filtrar por longitud, pero eso era lo que congelaba.
+                    //  Esta aproximación es suficiente para cargar la UI).
+                    return group && group.length >= NUM_QUIZ_OPTIONS; 
                 });
-                vocabCount = flatVocab.length;
-                const wordsPerPart = Math.ceil(vocabCount / numParts);
+
+                const wordsPerPart = Math.ceil(validVocab.length / numParts);
 
                 for (let i = 1; i <= numParts; i++) {
-                    const startK = (i - 1) * kpp;
-                    const pLen = kanjisInLevel.slice(startK, startK + kpp).length;
-                    
                     const startW = (i - 1) * wordsPerPart;
-                    const wLen = flatVocab.slice(startW, startW + wordsPerPart).length;
+                    const vocabPart = validVocab.slice(startW, startW + wordsPerPart);
 
                     parts.push({
                         id: `${lvlStr}_${i}`,
-                        name: `JLPT N${lvlNum}` + (numParts > 1 ? ` (${i}/${numParts})` : ''),
+                        name: `JLPT N${lvlNum}`,
                         originalLevel: lvlStr,
-                        count: pLen,
-                        kotoba_count: wLen,
-                        colorClass: JLPT_LEVEL_COLORS[lvlStr] || 'btn-secondary',
-                        kanjiList: kanjisInLevel, 
-                        kpp: kpp,
-                        fullVocab: flatVocab,
-                        partNum: i
+                        count: kanjisInLevel.slice((i-1)*kpp, i*kpp).length,
+                        kotoba_count: vocabPart.length,
+                        kanjiList: kanjisInLevel.slice((i-1)*kpp, i*kpp),
+                        fullVocabPart: vocabPart,
+                        partNum: i,
+                        totalParts: numParts
                     });
                 }
-            });
-            this.availableParts = parts;
+            }
+            this.availablePartsRaw = parts;
         },
 
-        startLevel(part) {
+        startLevel(part, mode) {
             this.selectedLevel = part;
-            this.answeredCorrectly = false;
+            this.quizMode = mode;
+            this.showImmediateCorrectFeedback = false;
             this.incorrectlySelectedOptions = [];
-            this.isLoading = true;
-
-            if (this.quizMode === 'kanji') {
-                this.generateKanjiQuiz(part);
-            } else {
-                this.generateVocabQuiz(part);
-            }
+            this.correctCount = 0; 
+            this.wrongCount = 0;
+            
+            if (mode === 'kanji') this.generateKanjiQuiz(part);
+            else this.generateVocabQuiz(part);
         },
 
         generateKanjiQuiz(part) {
-            const start = (part.partNum - 1) * part.kpp;
-            const end = start + part.kpp;
-            const targetKanjis = part.kanjiList.slice(start, end);
-            
-            shuffleArray(targetKanjis);
-
-            this.quizQueue = targetKanjis.map(char => {
-                const details = this.allKanjiData[char];
-                if (!details) return null;
-
-                const kuns = details.kun_readings || [];
-                const ons = details.on_readings || [];
+            const queue = part.kanjiList.map(char => {
+                const d = this.allKanjiData[char];
+                if (!d) return null;
                 
-                let correctHira = "";
-                let correctType = ""; 
-                let displayComp = ""; 
+                const kuns = cleanReadings(d.kun_readings);
+                const ons = cleanReadings(d.on_readings);
                 
-                const cleanKuns = cleanReadings(kuns);
-                const cleanOns = cleanReadings(ons);
+                let corrHira = "", corrType = "", dispComp = "";
+                if (kuns.length > 0) {
+                    corrHira = kuns[0].split('.')[0]; 
+                    corrType = 'kun'; 
+                    dispComp = kuns[0].replace('.', '');
+                } else if (ons.length > 0) {
+                    corrHira = kata2hira(ons[0]); 
+                    corrType = 'on'; 
+                    dispComp = ons[0];
+                } else return null;
 
-                if (cleanKuns.length > 0) {
-                    const raw = cleanKuns[0];
-                    correctHira = raw.split('.')[0]; 
-                    correctType = 'kun';
-                    displayComp = raw.replace('.', '');
-                } else if (cleanOns.length > 0) {
-                    const raw = cleanOns[0];
-                    correctHira = kata2hira(raw);
-                    correctType = 'on';
-                    displayComp = raw;
-                } else {
-                    return null; 
-                }
-
-                const meanings = (details.meanings || []).filter(m => !CONFUSING_MEANINGS_BLACKLIST.has(m));
-                const meaningStr = meanings.slice(0, 3).join("; ") || "S/D";
-
-                const options = this.generateKanjiOptions(correctHira, correctType, displayComp, cleanKuns, cleanOns, part.kanjiList, char);
-
+                const opts = this.generateKanjiOptions(corrHira, corrType, dispComp, kuns, ons, part.kanjiList, char);
+                
                 return {
                     kanji: char,
-                    meaning: meaningStr,
-                    correct_value: correctHira,
-                    options: options,
-                    correct_contextual_reading: displayComp
+                    meaning: (d.meanings || []).slice(0, 3).join("; "),
+                    correct_value: corrHira,
+                    correct_contextual_reading: dispComp,
+                    options: opts
                 };
-            }).filter(q => q !== null);
-
-            this.finalizeQuizSetup();
+            }).filter(q => q);
+            
+            this.startQuiz(queue);
         },
 
-        generateKanjiOptions(correctVal, type, displayComp, kuns, ons, allKanjisInLevel, currentChar) {
-            const opts = [];
-            
-            opts.push({
-                value: correctVal,
-                display_kun: type === 'kun' ? displayComp : (kuns[0] || '-'),
-                display_on_kata: type === 'on' ? displayComp : (ons[0] || '-')
-            });
+        generateKanjiOptions(correctVal, type, displayComp, kuns, ons, levelList, currentChar) {
+            const opts = [{ value: correctVal, display_kun: type === 'kun' ? displayComp : (kuns[0] || '-'), display_on_kata: type === 'on' ? displayComp : (ons[0] || '-') }];
+            const pool = shuffleArray(levelList.filter(k => k !== currentChar));
 
-            const pool = shuffleArray(allKanjisInLevel.filter(k => k !== currentChar));
-            
-            for (const otherChar of pool) {
+            for (const other of pool) {
                 if (opts.length >= NUM_QUIZ_OPTIONS) break;
+                const d = this.allKanjiData[other];
+                if (!d) continue;
                 
-                const dDetails = this.allKanjiData[otherChar];
-                if (!dDetails) continue;
+                const dk = cleanReadings(d.kun_readings);
+                const do_ = cleanReadings(d.on_readings);
+                let dist = null;
 
-                const dKuns = cleanReadings(dDetails.kun_readings);
-                const dOns = cleanReadings(dDetails.on_readings);
-                
-                let distractor = null;
-                if (dKuns.length > 0) {
-                    distractor = {
-                        val: dKuns[0].split('.')[0],
-                        kun: dKuns[0].replace('.', ''),
-                        on: dOns[0] || '-'
-                    };
-                } else if (dOns.length > 0) {
-                     distractor = {
-                        val: kata2hira(dOns[0]),
-                        kun: '-',
-                        on: dOns[0]
-                    };
-                }
+                if (dk.length > 0) dist = { val: dk[0].split('.')[0], kun: dk[0].replace('.', ''), on: do_[0] || '-' };
+                else if (do_.length > 0) dist = { val: kata2hira(do_[0]), kun: '-', on: do_[0] };
 
-                if (distractor && !opts.some(o => o.value === distractor.val)) {
-                    opts.push({
-                        value: distractor.val,
-                        display_kun: distractor.kun,
-                        display_on_kata: distractor.on
-                    });
+                if (dist && !opts.some(o => o.value === dist.val)) {
+                    opts.push({ value: dist.val, display_kun: dist.kun, display_on_kata: dist.on });
                 }
             }
-
             return shuffleArray(opts);
         },
 
         generateVocabQuiz(part) {
-            const vocabCount = part.fullVocab.length; 
-            const numParts = Math.ceil(part.kanjiList.length / part.kpp); 
-            const wordsPerPart = Math.ceil(vocabCount / numParts);
-            
-            const start = (part.partNum - 1) * wordsPerPart;
-            const end = start + wordsPerPart;
-            const targetWords = part.fullVocab.slice(start, end);
+            const queue = part.fullVocabPart.map(w => {
+                const pool = this.vocabByLevelCache[parseInt(part.originalLevel.replace('jlpt',''))][getOkuriganaEnding(w.word)] || [];
+                // Aquí el filtro es seguro porque 'pool' es pequeño (solo palabras con ese ending)
+                const dists = pool.filter(x => x.reading !== w.reading && x.reading.length === w.reading.length);
+                if (dists.length < NUM_QUIZ_OPTIONS - 1) return null;
 
-            const levelNum = parseInt(part.originalLevel.replace('jlpt', ''));
-            const vocabGroups = this.vocabByLevelCache[levelNum];
-
-            shuffleArray(targetWords);
-
-            this.quizQueue = targetWords.map(wordObj => {
-                const correctReading = wordObj.reading;
-                const ending = getOkuriganaEnding(wordObj.word);
-                
-                const group = vocabGroups[ending] || [];
-                const pool = group.filter(w => w.reading !== correctReading && w.reading.length === correctReading.length);
-                
-                if (pool.length < NUM_QUIZ_OPTIONS - 1) return null; 
-
-                shuffleArray(pool);
-                
-                const opts = [{ value: correctReading }];
-                pool.slice(0, NUM_QUIZ_OPTIONS - 1).forEach(d => opts.push({ value: d.reading }));
-                
-                const glosses = [];
-                wordObj.meanings.forEach(m => {
-                    if (m.glosses) glosses.push(...m.glosses);
-                });
+                const opts = [{value: w.reading}, ...shuffleArray(dists).slice(0, NUM_QUIZ_OPTIONS-1).map(d => ({value: d.reading}))];
                 
                 return {
-                    word: wordObj.word,
-                    meaning: glosses.slice(0, 3).join("; "),
-                    correct_value: correctReading,
+                    word: w.word,
+                    correct_value: w.reading,
+                    meaning: (w.meanings[0].glosses || []).join(", "),
                     options: shuffleArray(opts)
                 };
-            }).filter(q => q !== null);
-
-            this.finalizeQuizSetup();
+            }).filter(q => q);
+            
+            this.startQuiz(queue);
         },
 
-        finalizeQuizSetup() {
-            this.totalItemsInLevel = this.quizQueue.length;
+        startQuiz(queue) {
+            shuffleArray(queue);
+            this.quizQueue = queue;
+            this.totalItemsInLevel = queue.length;
             this.currentItemOrderIndex = 0;
-            this.isLoading = false;
-
-            if (this.quizQueue.length > 0) {
-                this.loadQuestion(0);
-            } else {
-                alert("No hay suficientes elementos para generar un quiz de este nivel.");
-                this.resetToMenu();
-            }
+            if (queue.length > 0) this.loadQuestion(0);
+            else this.resetToMenu();
         },
 
-        loadQuestion(index) {
-            this.answeredCorrectly = false;
+        loadQuestion(idx) {
+            this.showImmediateCorrectFeedback = false;
             this.incorrectlySelectedOptions = [];
-            this.currentQuestion = this.quizQueue[index];
+            this.currentQuestion = this.quizQueue[idx];
             this.options = this.currentQuestion.options;
-            this.$forceUpdate();
         },
 
         checkAnswer(option) {
-            if (this.answeredCorrectly) return;
+            if (this.showImmediateCorrectFeedback) return;
 
             if (option.value === this.currentQuestion.correct_value) {
-                this.answeredCorrectly = true;
-                // No hay timeout, esperamos click en siguiente
+                this.showImmediateCorrectFeedback = true;
+                this.correctCount++;
+                const itemKey = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
+                this.completedSessionItems.add(itemKey);
             } else {
                 this.incorrectlySelectedOptions.push(option.value);
+                this.wrongCount++;
             }
         },
 
@@ -455,20 +389,17 @@ new Vue({
                 this.currentItemOrderIndex++;
                 this.loadQuestion(this.currentItemOrderIndex);
             } else {
-                alert("¡Nivel Completado!");
                 this.resetToMenu();
             }
         },
 
         getButtonClass(option) {
-            if (this.answeredCorrectly && option.value === this.currentQuestion.correct_value) {
-                return 'btn-success animate-pulse';
-            }
-            if (this.incorrectlySelectedOptions.includes(option.value)) {
-                return 'btn-danger shake';
-            }
-            // Aquí usamos btn-outline-primary y dejamos que Bootstrap maneje el dark mode
+            if (this.incorrectlySelectedOptions.includes(option.value)) return 'btn-danger';
             return 'btn-outline-primary';
+        },
+        
+        isItemCompleted(key) {
+            return this.completedSessionItems.has(key);
         },
 
         resetToMenu() {

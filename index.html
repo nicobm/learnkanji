@@ -15,135 +15,171 @@
         html { height: 100%; overflow-y: auto; }
         body { min-height: 100%; position: relative; }
     </style>
+    
+    <script>
+        (function() {
+            try {
+                const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
+            } catch (e) { console.error("Error detectando tema:", e); }
+        })();
+    </script>
 </head>
-<body class="bg-app transition-colors duration-300">
-    <div id="app" v-cloak class="h-100 d-flex flex-column">
+<body class="d-flex flex-column">
+    <div id="app" v-cloak class="container py-1 py-md-4 flex-grow-1 d-flex flex-column">
         
-        <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-secondary shadow-soft transition-colors duration-300">
-            <div class="container-fluid px-3">
-                <a class="navbar-brand d-flex align-items-center gap-2 fw-bold font-ui" href="#" @click.prevent="resetToMenu">
-                    <span class="bg-primary text-white rounded p-1 d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
-                        <i class="fas fa-language"></i>
-                    </span>
-                    <span class="text-white">Kanji<span class="text-secondary">Master</span></span>
-                </a>
-            </div>
-        </nav>
-
-        <div class="container-fluid flex-grow-1 d-flex flex-column py-3 px-2 px-md-3 overflow-hidden">
-            
-            <div v-if="loadingData" class="flex-grow-1 d-flex flex-column justify-content-center align-items-center text-center p-4">
-                <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;"></div>
-                <h4 class="fw-bold font-ui text-muted">Cargando diccionario...</h4>
-            </div>
-
-            <div v-else-if="jsonLoadError" class="alert alert-danger m-4 text-center shadow-soft rounded-lg">
-                <i class="fas fa-exclamation-triangle fa-2x mb-3 d-block"></i>
-                <h4 class="alert-heading fw-bold">Error de Carga</h4>
-                <p>{{ jsonLoadError }}</p>
-                <button class="btn btn-outline-danger mt-2" @click="retryLoad">Reintentar</button>
-            </div>
-
-            <div v-else-if="!selectedLevel" class="flex-grow-1 overflow-auto animate-fade-in custom-scrollbar">
-                <div class="row g-3 justify-content-center pb-5">
-                    <div class="col-12 text-center mb-4 mt-2">
-                        <h2 class="fw-bold font-ui mb-2 text-body">Selecciona un Nivel</h2>
-                        <p class="text-muted">Elige tu desafío JLPT</p>
-                        
-                        <div class="btn-group shadow-soft" role="group">
-                            <input type="radio" class="btn-check" name="mode" id="modeKanji" value="kanji" v-model="quizMode">
-                            <label class="btn btn-outline-primary" for="modeKanji">Kanji</label>
-                            <input type="radio" class="btn-check" name="mode" id="modeKotoba" value="kotoba" v-model="quizMode">
-                            <label class="btn btn-outline-primary" for="modeKotoba">Palabras</label>
-                        </div>
-                    </div>
-
-                    <div v-for="part in availableParts" :key="part.id" class="col-6 col-sm-4 col-md-3 col-xl-2">
-                        <div class="card h-100 border-0 shadow-soft hover-lift cursor-pointer level-card"
-                             @click="startLevel(part)">
-                            <div class="card-body d-flex flex-column align-items-center justify-content-center text-center p-3 position-relative overflow-hidden">
-                                <div class="level-badge position-absolute top-0 end-0 mt-2 me-2 badge rounded-pill" 
-                                     :class="part.colorClass">
-                                    {{ part.originalLevel.replace('jlpt', 'N') }}
-                                </div>
-                                <h5 class="fw-bold mb-1 font-ui">{{ part.name }}</h5>
-                                <p class="small mb-0 opacity-75">
-                                    {{ quizMode === 'kanji' ? part.count + ' Kanjis' : part.kotoba_count + ' Palabras' }}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div v-else class="flex-grow-1 d-flex flex-column h-100 animate-slide-up">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <button class="btn btn-link text-decoration-none px-0 font-ui fw-bold text-muted" 
-                            @click="resetToMenu">
-                        <i class="fas fa-arrow-left me-1"></i> Menú
+        <div class="position-fixed top-0 end-0 p-2 p-md-3" style="z-index:1050">
+            <div class="d-flex align-items-center gap-2">
+                <button v-if="selectedLevel" class="btn btn-light shadow-sm btn-sm border" @click="resetToMenu" title="Menú">
+                    <i class="fas fa-arrow-left me-1"></i> <span class="d-none d-md-inline">Menú</span>
+                </button>
+                
+                <div v-if="selectedLevel && quizMode === 'kanji'" class="dropdown">
+                    <button class="btn btn-light shadow-sm btn-sm border" type="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-list me-1"></i> <span class="d-none d-md-inline">Lista</span>
                     </button>
-                    <div class="progress flex-grow-1 mx-3 shadow-inner rounded-pill" style="height: 12px; background-color: rgba(0,0,0,0.1);">
-                        <div class="progress-bar bg-primary rounded-pill transition-all" 
-                             role="progressbar" 
-                             :style="{ width: progressPercentage + '%' }"></div>
+                    <div class="dropdown-menu dropdown-menu-end p-2 shadow-lg border-0" style="max-height: 400px; overflow-y: auto; width: 300px;">
+                        <div v-if="kanjiListForLevel.length > 0" class="d-flex flex-wrap justify-content-center gap-2">
+                            <span v-for="kanji in kanjiListForLevel" :key="kanji" 
+                                  style="width: 44px; height: 44px;"
+                                  class="d-flex justify-content-center align-items-center rounded-circle fs-5 font-jp fw-bold"
+                                  :class="isItemCompleted(kanji) ? 'bg-success text-white' : 'bg-light text-secondary border'">
+                                {{ kanji }}
+                            </span>
+                        </div>
                     </div>
-                    <span class="badge rounded-pill bg-body-secondary text-body shadow-sm border font-ui">
-                        {{ currentItemOrderIndex + 1 }} / {{ totalItemsInLevel }}
-                    </span>
                 </div>
 
-                <div class="card flex-grow-1 border-0 shadow-hover rounded-lg overflow-hidden position-relative mb-3">
-                    
-                    <div class="card-body d-flex flex-column justify-content-between p-2 p-md-4 h-100 text-center position-relative z-10">
-                        
-                        <div class="flex-grow-1 d-flex flex-column justify-content-center align-items-center my-2">
-                            <h1 class="display-kanji fw-bold mb-0 font-jp text-gradient animate-pop-in">
-                                {{ currentDisplayChar }}
-                            </h1>
-                            
-                            <div class="mt-3" style="min-height: 3.5rem;">
-                                <transition name="fade">
-                                    <div v-if="answeredCorrectly" class="animate-fade-in">
-                                        <p class="h4 font-ui fw-medium mb-1 text-primary">
-                                            {{ currentMeaning }}
-                                        </p>
-                                        <p class="small opacity-75 mb-0" v-if="quizMode === 'kanji'">
-                                            Lectura Contextual: <strong>{{ currentCorrectContextualReading }}</strong>
-                                        </p>
-                                    </div>
-                                </transition>
+                <div v-if="selectedLevel && quizMode === 'kotoba'" class="dropdown">
+                    <button class="btn btn-light shadow-sm btn-sm border" type="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-book me-1"></i> <span class="d-none d-md-inline">Lista</span>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end p-0 shadow-lg border-0" style="max-height: 400px; overflow-y: auto; width: 300px;">
+                         <div v-if="kotobaListForLevel.length > 0">
+                            <ul class="list-group list-group-flush small">
+                                <li v-for="item in kotobaListForLevel" :key="item.word" 
+                                    class="list-group-item d-flex justify-content-between align-items-center px-3 py-2" 
+                                    :class="isItemCompleted(item.word) ? 'bg-success-subtle' : ''">
+                                    <span class="font-jp fw-bold">{{ item.word }}</span>
+                                    <span class="text-muted">{{ item.reading }}</span>
+                                    <i v-if="isItemCompleted(item.word)" class="fas fa-check text-success ms-2"></i>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="!selectedLevel" class="selection-screen-wrapper pt-4 pb-5">
+            <div class="text-center mb-4 mt-3">
+                <h1 class="display-6 fw-bold mb-2">Bienvenido / ようこそ</h1>
+                <p class="text-muted small">Selecciona un nivel para comenzar.</p>
+            </div>
+            
+            <div v-if="loadingData" class="text-center my-5">
+                 <div class="spinner-border text-primary" role="status"></div>
+                 <p class="mt-2 text-muted">Cargando diccionario...</p>
+            </div>
+
+            <div v-else v-for="group in orderedGroupedParts" :key="group.levelKey" class="mb-4">
+                <div class="d-flex align-items-center mb-3">
+                    <span class="badge bg-primary me-2 rounded-pill px-3 py-1">JLPT</span>
+                    <h2 class="h5 mb-0 fw-bold">{{ group.displayName }}</h2>
+                </div>
+                
+                <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xl-4 g-3">
+                    <div v-for="part in group.parts" :key="part.id" class="col">
+                        <div class="card card-level-select h-100">
+                            <div class="card-body text-center p-3">
+                                <div class="level-badge mb-2" style="width: 50px; height: 50px;">
+                                    <i class="fas fa-torii-gate fa-lg"></i>
+                                </div>
+                                <h5 class="card-title fw-bold mb-2 fs-6">Parte {{ part.partNum }} / {{ part.totalParts }}</h5>
+                                <div class="d-flex justify-content-center gap-3 text-muted small mb-3" style="font-size: 0.8rem;">
+                                    <div><i class="fas fa-font me-1"></i>{{ part.count }}</div>
+                                    <div><i class="fas fa-comment me-1"></i>{{ part.kotoba_count }}</div>
+                                </div>
+                                <div class="d-grid gap-2">
+                                     <button class="btn btn-primary btn-sm rounded-pill" @click="startLevel(part, 'kanji')">Kanji</button>
+                                    <button class="btn btn-outline-secondary btn-sm rounded-pill" @click="startLevel(part, 'kotoba')">Vocab</button>
+                                </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+             <p v-if="jsonLoadError" class="alert alert-danger text-center mt-4 shadow-sm">
+                 <i class="fas fa-exclamation-triangle me-2"></i>{{ jsonLoadError }}
+            </p>
+        </div>
 
-                        <div class="row g-2 g-md-3 w-100 mx-0 mt-auto">
-                            <template v-if="!answeredCorrectly">
-                                <div v-for="(option, index) in options" :key="index" class="col-6 col-md-4">
-                                    <button class="btn w-100 h-100 btn-option d-flex flex-column align-items-center justify-content-center text-center"
-                                            :class="getButtonClass(option)"
-                                            :disabled="isLoading || incorrectlySelectedOptions.includes(option.value)"
-                                            @click="checkAnswer(option)">
-                                        
-                                        <template v-if="quizMode === 'kanji'">
-                                            <div class="font-jp fw-bold fs-4 mb-0 text-truncate w-100">{{ option.display_kun }}</div>
-                                            <div class="font-jp text-muted small text-truncate w-100">{{ option.display_on_kata }}</div>
-                                        </template>
-                                        <template v-else>
-                                            <div class="font-jp fw-bold fs-5 text-break">{{ option.value }}</div>
-                                        </template>
-                                    </button>
-                                </div>
-                            </template>
+        <div v-else class="d-flex flex-column flex-grow-1 h-100 justify-content-between w-100" style="max-width: 900px; margin: 0 auto; overflow: hidden;">
+            
+            <div class="w-100 mt-4 mb-2 flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-end mb-1">
+                    <div>
+                        <h6 class="text-uppercase text-muted small fw-bold mb-0" style="font-size: 0.7rem;">{{ selectedLevel.name }}</h6>
+                        <h3 class="fw-bold mb-0">{{ quizMode === 'kanji' ? 'Lectura' : 'Vocab' }}</h3>
+                    </div>
+                    <div class="text-end">
+                        <div class="h5 mb-0 fw-bold" :class="winLossColor">{{ winLossRatio }}%</div>
+                    </div>
+                </div>
+                <div class="progress"><div class="progress-bar" role="progressbar" :style="{width:progressPercentage+'%'}"></div></div>
+            </div>
 
-                            <template v-else>
-                                <div class="col-12 animate-slide-up">
-                                    <button class="btn btn-success btn-lg w-100 py-3 font-ui fw-bold shadow-soft" 
-                                            @click="nextQuestion">
-                                        Siguiente <i class="fas fa-arrow-right ms-2"></i>
-                                    </button>
+            <div id="score-feedback-area" class="w-100 mb-2 flex-shrink-0" style="min-height: 50px;">
+                <transition name="fade">
+                    <div v-if="showImmediateCorrectFeedback" class="alert alert-success d-flex align-items-center justify-content-between shadow-sm border-0 bg-success-subtle text-success-emphasis rounded-3 p-2 mb-0">
+                        <div class="d-flex align-items-center overflow-hidden">
+                            <i class="fas fa-check-circle fa-lg me-2 flex-shrink-0"></i>
+                            <div class="overflow-hidden">
+                                <div class="d-flex align-items-baseline flex-wrap gap-2">
+                                    <span class="fw-bold fs-5 font-jp">{{ quizMode === 'kanji' ? currentCorrectContextualReading : currentQuestion.correct_value }}</span>
+                                    <span v-if="currentJapaneseMeaningKanjiForm" class="text-muted font-jp small">({{ currentJapaneseMeaningKanjiForm }})</span>
                                 </div>
-                            </template>
+                                <div class="text-muted small text-truncate" style="opacity: 0.9;">
+                                    {{ currentMeaning }}
+                                </div>
+                            </div>
                         </div>
+                        <div class="flex-shrink-0 ms-2">
+                            <button v-if="!levelTrulyCompleted" @click="nextQuestion" class="btn btn-primary rounded-circle shadow-sm btn-sm" style="width: 36px; height: 36px;">
+                                <i class="fas fa-arrow-right"></i>
+                            </button>
+                            <button v-else @click="resetToMenu" class="btn btn-success rounded-pill px-3 shadow-sm btn-sm">Fin</button>
+                        </div>
+                    </div>
+                </transition>
+            </div>
 
+            <div class="d-flex flex-column flex-grow-1 align-items-stretch justify-content-evenly pb-2" style="min-height: 0;">
+                
+                <div class="card d-flex align-items-center justify-content-center p-2 text-center w-100 mb-2" 
+                     style="flex: 1 1 auto; min-height: 0; overflow: hidden;">
+                    <div id="kanji-display-char" class="d-flex flex-column align-items-center justify-content-center w-100 h-100">
+                        <span v-if="quizMode === 'kanji' && currentQuestion" class="display-kanji">{{ currentQuestion.kanji }}</span>
+                        <span v-if="quizMode === 'kotoba' && currentQuestion" class="display-kanji text-break" style="font-size: clamp(2rem, 8vw, 4rem); line-height: 1.2;">{{ currentQuestion.word }}</span>
+                    </div>
+                </div>
+
+                <div class="d-flex flex-column justify-content-end w-100 flex-shrink-0">
+                    <div v-if="options.length > 0" class="row g-2">
+                        <div class="col-6" v-for="(option, index_opt) in options" :key="index_opt">
+                            <button @click="checkAnswer(option)"
+                                    class="btn w-100 h-100 btn-option d-flex flex-column align-items-center justify-content-center text-center"
+                                    :class="getButtonClass(option)"
+                                    :disabled="isLoading || showImmediateCorrectFeedback || incorrectlySelectedOptions.includes(option.value)">
+                                <template v-if="quizMode === 'kanji'">
+                                    <div class="font-jp fw-bold fs-4 mb-0 text-truncate w-100">{{ option.display_kun }}</div>
+                                    <div class="font-jp text-muted small text-truncate w-100">{{ option.display_on_kata }}</div>
+                                </template>
+                                <template v-else>
+                                    <div class="font-jp fw-bold fs-5 text-break">{{ option.value }}</div>
+                                </template>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

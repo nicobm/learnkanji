@@ -77,7 +77,6 @@ body {
 
 /* --- Área del Kanji Principal (AJUSTADO DESKTOP) --- */
 #kanji-display-char {
-    /* Reducido un 25% (era 200px) */
     min-height: 150px;
     display: flex;
     align-items: center;
@@ -87,15 +86,12 @@ body {
 .display-kanji {
     font-family: var(--font-jp);
     font-weight: 500;
-    /* Aumentado al DOBLE (era 6rem) */
     font-size: 12rem;
     color: var(--text-main);
-    /* Line-height ajustado para que la letra gigante no descuadre */
     line-height: 0.9;
 }
 @media (min-width: 768px) {
     .display-kanji { 
-        /* Aumentado al DOBLE (era 8rem) */
         font-size: 16rem; 
     }
 }
@@ -113,9 +109,9 @@ body {
 }
 
 /* --- Aumento del 25% en textos de botones para DESKTOP --- */
-.btn-option .fs-4 { font-size: 1.9rem !important; } /* Base ~1.5rem + 25% */
-.btn-option .fs-5 { font-size: 1.6rem !important; } /* Base ~1.25rem + 25% */
-.btn-option .small { font-size: 1.1rem !important; } /* Base ~0.875rem + 25% */
+.btn-option .fs-4 { font-size: 1.9rem !important; }
+.btn-option .fs-5 { font-size: 1.6rem !important; }
+.btn-option .small { font-size: 1.1rem !important; }
 
 [data-bs-theme="dark"] .btn-option {
     border-color: rgba(255,255,255,0.1);
@@ -174,30 +170,22 @@ body {
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter, .fade-leave-to { opacity: 0; }
 
-/* --- MODO COMPACTO PARA MÓVILES (Optimizado y ajustado) --- */
+/* --- MODO COMPACTO PARA MÓVILES --- */
 @media (max-width: 768px) {
     #app.container {
         padding-top: 0.25rem !important;
         padding-bottom: 0.25rem !important;
     }
-
-    /* Ajuste de la tarjeta contenedora del Kanji */
     #kanji-display-char {
         min-height: 0 !important;
         flex-grow: 0 !important; 
-        /* Reducido 25% (era 25vh -> 18.75vh) */
         height: 19vh; 
         overflow: visible; 
     }
-    
-    /* Kanji/Vocab: DOBLE DE TAMAÑO */
     .display-kanji {
-        /* Clamp duplicado: de (2.5, 7vh, 4) a (5, 14vh, 8) */
         font-size: clamp(5rem, 14vh, 8rem); 
         line-height: 0.9;
     }
-
-    /* AJUSTE DE BOTONES */
     .btn-option {
         padding: 0.5rem !important; 
         display: flex !important;
@@ -205,38 +193,24 @@ body {
         justify-content: center;
         min-height: 5rem; 
     }
-    
-    /* Texto principal (Hiragana) - Aumentado un 25% extra sobre la versión móvil */
     .btn-option .fs-4 {
-        /* De 1.35rem a 1.7rem */
         font-size: 1.7rem !important; 
         margin-bottom: 0.2rem;
         line-height: 1.2;
     }
-    
-    /* Texto secundario (Katakana/On'yomi) - Aumentado un 25% extra */
     .btn-option .small {
-        /* De 0.85rem a 1.06rem */
         font-size: 1.06rem !important;
         opacity: 0.9;
         display: block;
     }
-
-    /* Vocabulario (Kotoba) - Aumentado un 25% extra */
     .btn-option .fs-5 {
-        /* De 1.1rem a 1.4rem */
         font-size: 1.4rem !important;
     }
-
-    /* Ajustes de espaciado para compensar el tamaño gigante */
     .mb-4, .mb-5 { margin-bottom: 0.5rem !important; }
     .mb-3 { margin-bottom: 0.25rem !important; }
     .mb-2 { margin-bottom: 0.25rem !important; }
-
     .card-body { padding: 0.5rem !important; }
-    
     .row.g-2 { --bs-gutter-y: 0.4rem; --bs-gutter-x: 0.4rem; }
-
     h3.fw-bold { font-size: 1.25rem; }
     .progress { height: 0.4rem !important; }
 }
