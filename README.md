@@ -1,3 +1,5 @@
+eats data from https://kanjiapi.dev
+
 ### test locally
 
 1. download everything in a dir
