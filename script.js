@@ -1,353 +1,479 @@
-// script.js
+// Constantes de configuración
+const MAX_KANJI_PER_PART_DEFAULT = 45;
+const TARGET_PARTS_JLPT_N1 = 9;
+const NUM_QUIZ_OPTIONS = 6;
 
-const globalAllKanjiDataLoaded = typeof ALL_KANJI_DATA_PRESENT !== 'undefined' ? ALL_KANJI_DATA_PRESENT : false;
-let initialJsonLoadError = !globalAllKanjiDataLoaded ? "No se pudieron cargar los datos de Kanji desde el servidor." : "";
+// Configuración de dificultad
+const KOTOBA_KANJI_MAX_DIFFICULTY = {
+    5: [6, 1, 10],
+    4: [8, 2, 15],
+    3: [10, 4, 20],
+    2: [12, 6, 24],
+    1: [14, 8, 28],
+};
+
+const CONFUSING_MEANINGS_BLACKLIST = new Set([
+    'Turkey', 'U.S.A.', 'USA', 'America', 'United States', 'Great Britain',
+    'England', 'UK', 'U.K.', 'France', 'Germany', 'Italy', 'Russia',
+    'Spain', 'Portugal', 'Holland', 'Netherlands', 'Belgium', 'India',
+    'metre', 'gram', 'litre', 'liter', 'watt', 'page'
+]);
+
+const JLPT_LEVEL_COLORS = {
+    'jlpt5': 'btn-success', 'jlpt4': 'btn-info', 'jlpt3': 'btn-warning text-dark',
+    'jlpt2': 'btn-danger', 'jlpt1': 'btn-secondary',
+};
+
+// --- Funciones de Utilidad (Helpers) ---
+
+function kata2hira(str) {
+    return str.replace(/[\u30a1-\u30f6]/g, function(match) {
+        var chr = match.charCodeAt(0) - 0x60;
+        return String.fromCharCode(chr);
+    });
+}
+
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+function getOkuriganaEnding(word) {
+    if (!word) return "";
+    let ending = "";
+    for (let i = word.length - 1; i >= 0; i--) {
+        const charCode = word.charCodeAt(i);
+        if (charCode >= 0x3041 && charCode <= 0x3096) {
+            ending = word[i] + ending;
+        } else {
+            break;
+        }
+    }
+    return ending;
+}
+
+function cleanReadings(readings) {
+    if (!readings) return [];
+    const unique = new Set();
+    readings.forEach(r => {
+        if (!r) return;
+        let clean = r.replace(/^-|-$/g, '');
+        if (clean) unique.add(clean);
+    });
+    return Array.from(unique).sort();
+}
+
+// --- Vue App ---
 
 new Vue({
     el: '#app',
     data: {
-        jsonLoadError: initialJsonLoadError || null,
-        allKanjiDataAvailable: globalAllKanjiDataLoaded,
+        loadingData: true,
+        jsonLoadError: null,
+        
+        // Base de datos en memoria
+        allKanjiData: {}, 
+        allWordsData: {}, 
+        vocabByLevelCache: {}, 
+        
+        // Estado UI
+        darkMode: false,
         selectedLevel: null,
-        selectedLevelDisplay: '',
-        quizMode: 'kanji', // 'kanji' o 'kotoba'
+        quizMode: 'kanji',
+        availableParts: [],
 
-        // --- Estado del Quiz de Kanji ---
-        correctAnswers: 0,
-        incorrectAnswers: 0,
-        currentKanji: '',
-        currentKanjiMeaning: '',
-        correctHiragana: '',
-        currentCorrectContextualReading: '',
-        japaneseMeaningKanjiForm: '',
-        allMeanings: [],
-        allKunReadings: [],
-        allOnReadings: [],
-        currentLevelOrderedKanjis: [],
-
-        // --- Estado del Quiz de Kotoba ---
-        currentLevelKotoba: [],
-        currentWord: {},
-        correctReading: '',
-        
-        // --- Estado Común del Quiz ---
+        // Estado del Quiz
+        quizQueue: [], 
+        currentQuestion: null, 
         options: [],
-        isLoading: false,
-        quizError: null,
-        answeredCorrectly: false,
-        showImmediateCorrectFeedback: false,
-        incorrectlySelectedOptions: [],
-        currentSessionSeenItems: [],
-        totalItemsInLevel: 0,
-        currentItemOrderIndex: 0,
         
-        // --- Estado General de la App ---
-        nextKanjiTimeoutId: null,
-        levelTrulyCompleted: false,
-        jlptCounts: [],
-        kanjiListForLevel: [], 
-        kotobaListForLevel: [], 
-        completedKanjis: [],
-        completedKotoba: [], 
+        // Progreso
+        currentItemOrderIndex: 0,
+        totalItemsInLevel: 0,
+        
+        // Interacción
+        isLoading: false,
+        answeredCorrectly: false,
+        incorrectlySelectedOptions: []
     },
     computed: {
-        displayMeanings() {
-            if (this.quizMode === 'kanji') {
-                return this.allMeanings || [];
-            }
-            if (this.quizMode === 'kotoba' && this.currentWord) {
-                return this.currentWord.meanings || [];
-            }
-            return [];
+        currentDisplayChar() {
+            if (!this.currentQuestion) return '';
+            return this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
         },
-        totalKanjisInLevel() { return this.totalItemsInLevel }, 
-        currentKanjiOrderIndex() { return this.currentItemOrderIndex },
-        kanjiSeenInLevelCountDisplay() {
+        currentMeaning() {
+            if (!this.currentQuestion) return '';
+            return this.currentQuestion.meaning;
+        },
+        currentCorrectContextualReading() {
+            if (!this.currentQuestion) return '';
+            return this.currentQuestion.correct_contextual_reading || '';
+        },
+        progressPercentage() {
             if (this.totalItemsInLevel === 0) return 0;
-            return Math.min(this.currentItemOrderIndex + 1, this.totalItemsInLevel);
-        },
-        progressPercent() {
-            if (this.totalItemsInLevel === 0) return 0;
-            return (this.kanjiSeenInLevelCountDisplay / this.totalItemsInLevel) * 100;
-        },
-        winLossRatio() {
-            if (this.totalItemsInLevel === 0) return 100;
-            const wins = Math.max(0, this.totalItemsInLevel - this.incorrectAnswers);
-            const ratio = (wins / this.totalItemsInLevel) * 100;
-
-            if (this.quizMode === 'kotoba') {
-                return ratio.toFixed(1);
-            } else {
-                return Math.round(ratio);
-            }
-        },
-        japaneseMeaningIsDistinct() {
-            if (this.quizMode !== 'kanji' || !this.currentCorrectContextualReading || !this.allKunReadings.length) return false;
-            const relevantReading = this.allKunReadings.find(r => r.context === this.currentCorrectContextualReading);
-            if (!relevantReading) return false;
-            return relevantReading.context !== relevantReading.root;
-        },
-        orderedGroupedJlptParts() {
-            if (!this.jlptCounts || this.jlptCounts.length === 0) return [];
-            const groups = this.jlptCounts.reduce((acc, part) => {
-                acc[part.originalLevel] = acc[part.originalLevel] || {
-                    levelKey: part.originalLevel,
-                    displayName: `JLPT N${part.originalLevel.replace('jlpt', '')}`,
-                    parts: []
-                };
-                acc[part.originalLevel].parts.push(part);
-                return acc;
-            }, {});
-            const levelOrder = ['jlpt5', 'jlpt4', 'jlpt3', 'jlpt2', 'jlpt1'];
-            return levelOrder.filter(key => groups[key]).map(key => groups[key]);
-        },
-        // Devuelve clases de Bootstrap para el texto del ratio
-        winLossRatioClass() {
-            const ratio = parseFloat(this.winLossRatio);
-            if (ratio >= 90) return 'text-success fw-bold';
-            if (ratio >= 80) return 'text-success fw-semibold';
-            if (ratio >= 70) return 'text-warning fw-bold';
-            if (ratio >= 60) return 'text-warning fw-semibold';
-            if (ratio >= 50) return 'text-danger fw-semibold';
-            return 'text-danger fw-bold';
+            return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
         }
+    },
+    watch: {
+        darkMode(val) {
+            document.documentElement.setAttribute('data-bs-theme', val ? 'dark' : 'light');
+            localStorage.setItem('theme', val ? 'dark' : 'light');
+        }
+    },
+    created() {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            this.darkMode = savedTheme === 'dark';
+        } else {
+            this.darkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        }
+        
+        this.loadData();
     },
     methods: {
-        _clearTimeouts() {
-            if (this.nextKanjiTimeoutId) clearTimeout(this.nextKanjiTimeoutId); this.nextKanjiTimeoutId = null;
-        },
-        _resetQuizProgress() {
-            Object.assign(this, {
-                correctAnswers: 0, incorrectAnswers: 0, currentSessionSeenItems: [],
-                totalItemsInLevel: 0, currentLevelOrderedKanjis: [], currentLevelKotoba: [], currentItemOrderIndex: 0,
-                levelTrulyCompleted: false, completedKanjis: [], completedKotoba: []
-            });
-        },
-        _resetCurrentItemState() {
-            Object.assign(this, {
-                currentKanji: '', currentKanjiMeaning: '', correctHiragana: '',
-                currentCorrectContextualReading: '', japaneseMeaningKanjiForm: '',
-                allMeanings: [],
-                allKunReadings: [], allOnReadings: [],
-                currentWord: {}, correctReading: '',
-                options: [], quizError: null, answeredCorrectly: false,
-                showImmediateCorrectFeedback: false, incorrectlySelectedOptions: []
-            });
-        },
-        resetAppAndQuizState() {
-            this._clearTimeouts();
-            this._resetQuizProgress();
-            this._resetCurrentItemState();
-            this.isLoading = false;
-        },
-        selectLevel(levelId) {
-            this.quizMode = 'kanji';
-            this.startLevel(levelId, this.loadKanjiData);
-        },
-        selectKotobaLevel(levelId) {
-            this.quizMode = 'kotoba';
-            this.startLevel(levelId, this.loadKotobaData);
-        },
-        startLevel(levelId, loaderFunction) {
-            if (this.jsonLoadError && !this.allKanjiDataAvailable && this.jlptCounts.length === 0) {
-                console.warn("Selección de nivel bloqueada: Faltan datos JSON."); return;
-            }
-            this.selectedLevel = levelId;
-            const selectedPart = this.jlptCounts.find(part => part.id === levelId);
-            const modePrefix = this.quizMode === 'kotoba' ? 'Kotoba: ' : '';
-            this.selectedLevelDisplay = selectedPart ? modePrefix + selectedPart.name : `Nivel ${levelId.replace('jlpt', 'N')}`;
-            this.resetAppAndQuizState();
-            loaderFunction(levelId);
-        },
-        goBackToLevelSelection() {
-            this.resetAppAndQuizState();
-            this.selectedLevel = null;
-            this.selectedLevelDisplay = '';
-            this.kanjiListForLevel = [];
-            this.kotobaListForLevel = [];
-            this.quizMode = 'kanji';
-        },
-        async _fetchJson(url, errorPrefix = "Error en fetch") {
-            const response = await fetch(url);
-            if (!response.ok) {
-                let errorDetail = `Error HTTP ${response.status}`;
-                try { errorDetail = (await response.json()).error || errorDetail; } catch (e) {}
-                throw new Error(`${errorPrefix}: ${errorDetail}`);
-            }
-            return response.json();
-        },
-        async loadKanjiData(levelId) {
-            this.isLoading = true;
-            this.quizError = null;
+        async loadData() {
+            this.loadingData = true;
+            this.jsonLoadError = null;
             try {
-                const quizDataList = await this._fetchJson(`/api/level_details/${levelId}`, "Error al cargar datos de kanji");
-                if (quizDataList && quizDataList.length > 0) {
-                    this.currentLevelOrderedKanjis = quizDataList;
-                    this.kanjiListForLevel = quizDataList.map(q => q.kanji);
-                    this.totalItemsInLevel = quizDataList.length;
-                    this.resetCountersAndStart(this.displayKanjiByIndex);
-                } else {
-                    this.handleEmptyLevel();
-                }
-            } catch (error) { this.handleLoadError(error); } 
-            finally { this.isLoading = false; }
+                // Fetch al archivo JSON estático
+                const response = await fetch('kanjiapi_small.json');
+                if (!response.ok) throw new Error("No se pudo cargar 'kanjiapi_small.json' (Estado: " + response.status + ")");
+                
+                const data = await response.json();
+                this.allKanjiData = data.kanjis || {};
+                this.allWordsData = data.words || {};
+                
+                this.preloadVocabulary();
+                this.generatePartsList();
+                
+                this.loadingData = false;
+            } catch (e) {
+                console.error(e);
+                this.jsonLoadError = "Error cargando datos: " + e.message;
+                this.loadingData = false;
+            }
         },
-        async loadKotobaData(levelId) {
-            this.isLoading = true;
-            this.quizError = null;
-            try {
-                const kotobaList = await this._fetchJson(`/api/vocabulary/${levelId}`, "Error al cargar kotoba");
-                if (kotobaList && kotobaList.length > 0) {
-                    this.currentLevelKotoba = kotobaList;
-                    this.kotobaListForLevel = kotobaList;
-                    this.totalItemsInLevel = kotobaList.length;
-                    this.resetCountersAndStart(this.displayKotobaByIndex);
-                } else {
-                    this.handleEmptyLevel();
-                }
-            } catch (error) { this.handleLoadError(error); }
-             finally { this.isLoading = false; }
-        },
-        resetCountersAndStart(displayFunction) {
-            Object.assign(this, {
-                incorrectAnswers: 0, correctAnswers: 0,
-                currentSessionSeenItems: [], currentItemOrderIndex: 0, completedKanjis: [], completedKotoba: []
-            });
-            displayFunction(0);
-        },
-        handleEmptyLevel() {
-            Object.assign(this, { currentLevelOrderedKanjis: [], currentLevelKotoba: [], totalItemsInLevel: 0, quizError: `No hay items para ${this.selectedLevelDisplay}.`, currentKanji:'', currentWord: {}, options:[] });
-        },
-        handleLoadError(error) {
-            console.error("Error en carga de nivel:", error);
-            this.quizError = error.message;
-            this.handleEmptyLevel();
-        },
-        displayKanjiByIndex(index) {
-            this._resetCurrentItemState();
-            if (index < 0 || index >= this.currentLevelOrderedKanjis.length) { this.levelTrulyCompleted = true; return; }
-            const data = this.currentLevelOrderedKanjis[index];
-            Object.assign(this, {
-                currentKanji: data.kanji || '?', correctHiragana: data.hiragana || '', options: data.options || [],
-                currentKanjiMeaning: data.meaning || '', currentCorrectContextualReading: data.correct_contextual_reading || '',
-                japaneseMeaningKanjiForm: data.japanese_meaning_kanji_form || '',
-                allMeanings: data.all_meanings || [],
-                allKunReadings: data.all_kun_readings || [], allOnReadings: data.all_on_readings || [],
-                isLoading: false 
-            });
-        },
-        displayKotobaByIndex(index) {
-            this._resetCurrentItemState();
-            if (index < 0 || index >= this.currentLevelKotoba.length) { this.levelTrulyCompleted = true; return; }
-            const data = this.currentLevelKotoba[index];
-            this.currentWord = data;
-            this.correctReading = data.reading;
-            this.options = data.options || []; 
-            this.isLoading = false;
-        },
-        async checkAnswer(selectedValue) {
-            if (this.isLoading || this.answeredCorrectly || this.levelTrulyCompleted) return;
-            if (this.incorrectlySelectedOptions.includes(selectedValue)) return;
 
-            this._clearTimeouts();
-            
-            const correctAnswer = this.quizMode === 'kanji' ? this.correctHiragana : this.correctReading;
-            const currentItemIdentifier = this.quizMode === 'kanji' ? this.currentKanji : this.currentWord.word;
+        retryLoad() {
+            this.loadData();
+        },
 
-            if (String(selectedValue).trim() === String(correctAnswer).trim()) {
-                Object.assign(this, {answeredCorrectly:true, showImmediateCorrectFeedback:true, quizError:null});
-                if (!this.currentSessionSeenItems.includes(currentItemIdentifier)) {
-                    this.correctAnswers++;
-                }
+        preloadVocabulary() {
+            const levels = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}};
+            const uniqueSet = new Set();
 
-                if (this.quizMode === 'kanji' && !this.completedKanjis.includes(this.currentKanji)) {
-                    this.completedKanjis.push(this.currentKanji);
-                } else if (this.quizMode === 'kotoba' && !this.completedKotoba.includes(this.currentWord.word)) {
-                    this.completedKotoba.push(this.currentWord.word);
+            for (const key in this.allWordsData) {
+                const entries = this.allWordsData[key];
+                if (!Array.isArray(entries)) continue;
+
+                entries.forEach(entry => {
+                    const variants = entry.variants || [];
+                    const meanings = entry.meanings || [];
+                    if (variants.length === 0 || meanings.length === 0) return;
+
+                    const word = variants[0].written;
+                    const reading = variants[0].pronounced;
+                    
+                    let minLevel = null; 
+                    let isValid = true;
+                    
+                    for (const char of word) {
+                        if (char >= '\u4e00' && char <= '\u9faf') {
+                            const kData = this.allKanjiData[char];
+                            if (!kData || !kData.jlpt) {
+                                isValid = false; break;
+                            }
+                            if (minLevel === null || kData.jlpt < minLevel) {
+                                minLevel = kData.jlpt;
+                            }
+                        }
+                    }
+
+                    if (!isValid || minLevel === null) return;
+                    
+                    const firstGloss = meanings[0].glosses ? meanings[0].glosses[0] : '';
+                    const uniqueKey = `${word}|${reading}|${firstGloss}`;
+                    
+                    if (uniqueSet.has(uniqueKey)) return;
+                    uniqueSet.add(uniqueKey);
+
+                    const ending = getOkuriganaEnding(word);
+                    if (!levels[minLevel][ending]) levels[minLevel][ending] = [];
+                    
+                    levels[minLevel][ending].push({
+                        word: word,
+                        reading: reading,
+                        meanings: meanings
+                    });
+                });
+            }
+            this.vocabByLevelCache = levels;
+        },
+
+        generatePartsList() {
+            const parts = [];
+            ['jlpt5', 'jlpt4', 'jlpt3', 'jlpt2', 'jlpt1'].forEach(lvlStr => {
+                const lvlNum = parseInt(lvlStr.replace('jlpt', ''));
+                
+                const kanjisInLevel = Object.keys(this.allKanjiData).filter(k => 
+                    this.allKanjiData[k].jlpt === lvlNum
+                ).sort();
+
+                if (kanjisInLevel.length === 0) return;
+
+                let kpp = MAX_KANJI_PER_PART_DEFAULT;
+                if (lvlStr === 'jlpt1') {
+                    kpp = Math.max(1, Math.ceil(kanjisInLevel.length / TARGET_PARTS_JLPT_N1));
                 }
                 
-                if (this.currentItemOrderIndex >= this.totalItemsInLevel - 1) {
-                    this.levelTrulyCompleted = true;
+                const numParts = Math.ceil(kanjisInLevel.length / kpp);
+                
+                let vocabCount = 0;
+                const vocabGroups = this.vocabByLevelCache[lvlNum] || {};
+                const flatVocab = [];
+                Object.values(vocabGroups).forEach(group => {
+                    if (group.length >= NUM_QUIZ_OPTIONS) {
+                        flatVocab.push(...group);
+                    }
+                });
+                vocabCount = flatVocab.length;
+                const wordsPerPart = Math.ceil(vocabCount / numParts);
+
+                for (let i = 1; i <= numParts; i++) {
+                    const startK = (i - 1) * kpp;
+                    const pLen = kanjisInLevel.slice(startK, startK + kpp).length;
+                    
+                    const startW = (i - 1) * wordsPerPart;
+                    const wLen = flatVocab.slice(startW, startW + wordsPerPart).length;
+
+                    parts.push({
+                        id: `${lvlStr}_${i}`,
+                        name: `JLPT N${lvlNum}` + (numParts > 1 ? ` (${i}/${numParts})` : ''),
+                        originalLevel: lvlStr,
+                        count: pLen,
+                        kotoba_count: wLen,
+                        colorClass: JLPT_LEVEL_COLORS[lvlStr] || 'btn-secondary',
+                        kanjiList: kanjisInLevel, 
+                        kpp: kpp,
+                        partNum: i,
+                        fullVocab: flatVocab 
+                    });
                 }
+            });
+            this.availableParts = parts;
+        },
+
+        startLevel(part) {
+            this.selectedLevel = part;
+            this.answeredCorrectly = false;
+            this.incorrectlySelectedOptions = [];
+            this.isLoading = true;
+
+            if (this.quizMode === 'kanji') {
+                this.generateKanjiQuiz(part);
             } else {
-                if (!this.currentSessionSeenItems.includes(currentItemIdentifier)) {
-                    this.incorrectAnswers++;
-                    this.currentSessionSeenItems.push(currentItemIdentifier);
-                }
-                this.incorrectlySelectedOptions.push(selectedValue);
-                Object.assign(this, {answeredCorrectly:false, showImmediateCorrectFeedback:false});
+                this.generateVocabQuiz(part);
             }
         },
-        loadNextQuestionAfterCorrect() {
-            this.currentItemOrderIndex++;
-            const displayFunction = this.quizMode === 'kanji' ? this.displayKanjiByIndex : this.displayKotobaByIndex;
-            displayFunction(this.currentItemOrderIndex);
-        },
-        
-        // --- ESTILO DE BOTONES (Consistente con custom.css) ---
-        getButtonClass(opt){
-            const correctAnswer = this.quizMode === 'kanji' ? this.correctHiragana : this.correctReading;
+
+        generateKanjiQuiz(part) {
+            const start = (part.partNum - 1) * part.kpp;
+            const end = start + part.kpp;
+            const targetKanjis = part.kanjiList.slice(start, end);
             
-            if (this.answeredCorrectly && opt.value === correctAnswer) {
-                return 'btn-success'; 
-            }
-            if (this.incorrectlySelectedOptions.includes(opt.value)) {
-                return 'btn-danger disabled';
-            }
-            if (this.answeredCorrectly && opt.value !== correctAnswer) {
-                return 'btn-outline-secondary disabled border-0 opacity-25';
-            }
-            return 'btn-option';
-        },
+            shuffleArray(targetKanjis);
 
-        isKanjiCompleted(kanjiChar) {
-            return this.completedKanjis.includes(kanjiChar);
-        },
-        isKotobaCompleted(kotobaWord) {
-            return this.completedKotoba.includes(kotobaWord);
-        },
-        
-        // --- LÓGICA DE TEMA AUTOMÁTICO ---
-        initAutoTheme() {
-            // Función para aplicar tema según el media query
-            const applyTheme = (e) => {
-                const theme = e.matches ? 'dark' : 'light';
-                document.documentElement.setAttribute('data-bs-theme', theme);
-            };
+            this.quizQueue = targetKanjis.map(char => {
+                const details = this.allKanjiData[char];
+                if (!details) return null;
 
-            // Detectar preferencia inicial
-            const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-            applyTheme(mediaQuery); // Aplicar al inicio
+                const kuns = details.kun_readings || [];
+                const ons = details.on_readings || [];
+                
+                let correctHira = "";
+                let correctType = ""; 
+                let displayComp = ""; 
+                
+                const cleanKuns = cleanReadings(kuns);
+                const cleanOns = cleanReadings(ons);
 
-            // Escuchar cambios en vivo (si el usuario cambia el tema del SO)
-            mediaQuery.addEventListener('change', applyTheme);
-        }
-    },
-    mounted() {
-        this.initAutoTheme();
-
-        const jlptPartsDataScript = document.getElementById('jlpt-parts-data-script');
-        if (jlptPartsDataScript && jlptPartsDataScript.textContent.trim()) {
-            try {
-                const parsedJlptCounts = JSON.parse(jlptPartsDataScript.textContent);
-                this.jlptCounts = Array.isArray(parsedJlptCounts) ? parsedJlptCounts : [];
-                if (!Array.isArray(parsedJlptCounts)) {
-                    console.error("JLPT parts data is not an array:", parsedJlptCounts);
-                    if (!this.jsonLoadError) this.jsonLoadError = "Error de formato de datos JLPT.";
+                if (cleanKuns.length > 0) {
+                    const raw = cleanKuns[0];
+                    correctHira = raw.split('.')[0]; 
+                    correctType = 'kun';
+                    displayComp = raw.replace('.', '');
+                } else if (cleanOns.length > 0) {
+                    const raw = cleanOns[0];
+                    correctHira = kata2hira(raw);
+                    correctType = 'on';
+                    displayComp = raw;
+                } else {
+                    return null; 
                 }
-            } catch (e) {
-                console.error("Error parsing JLPT parts JSON:", e);
-                this.jlptCounts = [];
-                if (!this.jsonLoadError) this.jsonLoadError = "Error al procesar JSON de JLPT.";
+
+                const meanings = (details.meanings || []).filter(m => !CONFUSING_MEANINGS_BLACKLIST.has(m));
+                const meaningStr = meanings.slice(0, 3).join("; ") || "S/D";
+
+                const options = this.generateKanjiOptions(correctHira, correctType, displayComp, cleanKuns, cleanOns, part.kanjiList, char);
+
+                return {
+                    kanji: char,
+                    meaning: meaningStr,
+                    correct_value: correctHira,
+                    options: options,
+                    correct_contextual_reading: displayComp
+                };
+            }).filter(q => q !== null);
+
+            this.finalizeQuizSetup();
+        },
+
+        generateKanjiOptions(correctVal, type, displayComp, kuns, ons, allKanjisInLevel, currentChar) {
+            const opts = [];
+            
+            opts.push({
+                value: correctVal,
+                display_kun: type === 'kun' ? displayComp : (kuns[0] || '-'),
+                display_on_kata: type === 'on' ? displayComp : (ons[0] || '-')
+            });
+
+            const pool = shuffleArray(allKanjisInLevel.filter(k => k !== currentChar));
+            
+            for (const otherChar of pool) {
+                if (opts.length >= NUM_QUIZ_OPTIONS) break;
+                
+                const dDetails = this.allKanjiData[otherChar];
+                if (!dDetails) continue;
+
+                const dKuns = cleanReadings(dDetails.kun_readings);
+                const dOns = cleanReadings(dDetails.on_readings);
+                
+                let distractor = null;
+                if (dKuns.length > 0) {
+                    distractor = {
+                        val: dKuns[0].split('.')[0],
+                        kun: dKuns[0].replace('.', ''),
+                        on: dOns[0] || '-'
+                    };
+                } else if (dOns.length > 0) {
+                     distractor = {
+                        val: kata2hira(dOns[0]),
+                        kun: '-',
+                        on: dOns[0]
+                    };
+                }
+
+                if (distractor && !opts.some(o => o.value === distractor.val)) {
+                    opts.push({
+                        value: distractor.val,
+                        display_kun: distractor.kun,
+                        display_on_kata: distractor.on
+                    });
+                }
             }
-        } else {
-            console.warn("JLPT parts data script not found or empty.");
-            if (this.allKanjiDataAvailable && !this.jsonLoadError) {
-                this.jsonLoadError = "No se encontró el script de datos JLPT.";
+
+            return shuffleArray(opts);
+        },
+
+        generateVocabQuiz(part) {
+            const vocabCount = part.fullVocab.length; 
+            const numParts = Math.ceil(part.kanjiList.length / part.kpp); 
+            const wordsPerPart = Math.ceil(vocabCount / numParts);
+            
+            const start = (part.partNum - 1) * wordsPerPart;
+            const end = start + wordsPerPart;
+            const targetWords = part.fullVocab.slice(start, end);
+
+            const levelNum = parseInt(part.originalLevel.replace('jlpt', ''));
+            const vocabGroups = this.vocabByLevelCache[levelNum];
+
+            shuffleArray(targetWords);
+
+            this.quizQueue = targetWords.map(wordObj => {
+                const correctReading = wordObj.reading;
+                const ending = getOkuriganaEnding(wordObj.word);
+                
+                const group = vocabGroups[ending] || [];
+                const pool = group.filter(w => w.reading !== correctReading && w.reading.length === correctReading.length);
+                
+                if (pool.length < NUM_QUIZ_OPTIONS - 1) return null; 
+
+                shuffleArray(pool);
+                
+                const opts = [{ value: correctReading }];
+                pool.slice(0, NUM_QUIZ_OPTIONS - 1).forEach(d => opts.push({ value: d.reading }));
+                
+                const glosses = [];
+                wordObj.meanings.forEach(m => {
+                    if (m.glosses) glosses.push(...m.glosses);
+                });
+                
+                return {
+                    word: wordObj.word,
+                    meaning: glosses.slice(0, 3).join("; "),
+                    correct_value: correctReading,
+                    options: shuffleArray(opts)
+                };
+            }).filter(q => q !== null);
+
+            this.finalizeQuizSetup();
+        },
+
+        finalizeQuizSetup() {
+            this.totalItemsInLevel = this.quizQueue.length;
+            this.currentItemOrderIndex = 0;
+            this.isLoading = false;
+
+            if (this.quizQueue.length > 0) {
+                this.loadQuestion(0);
+            } else {
+                alert("No hay suficientes elementos para generar un quiz de este nivel.");
+                this.resetToMenu();
             }
-        }
-        if (!this.jsonLoadError && this.allKanjiDataAvailable && this.jlptCounts.length === 0) {
-            this.jsonLoadError = "Datos Kanji OK, pero no se generaron partes JLPT.";
+        },
+
+        loadQuestion(index) {
+            this.answeredCorrectly = false;
+            this.incorrectlySelectedOptions = [];
+            this.currentQuestion = this.quizQueue[index];
+            this.options = this.currentQuestion.options;
+        },
+
+        checkAnswer(option) {
+            if (this.answeredCorrectly) return;
+
+            if (option.value === this.currentQuestion.correct_value) {
+                this.answeredCorrectly = true;
+                setTimeout(() => {
+                    if (this.currentItemOrderIndex < this.totalItemsInLevel - 1) {
+                        this.currentItemOrderIndex++;
+                        this.loadQuestion(this.currentItemOrderIndex);
+                    } else {
+                        alert("¡Nivel Completado!");
+                        this.resetToMenu();
+                    }
+                }, 1500); 
+            } else {
+                this.incorrectlySelectedOptions.push(option.value);
+            }
+        },
+
+        getButtonClass(option) {
+            if (this.answeredCorrectly && option.value === this.currentQuestion.correct_value) {
+                return 'btn-success animate-pulse';
+            }
+            if (this.incorrectlySelectedOptions.includes(option.value)) {
+                return 'btn-danger shake';
+            }
+            return this.darkMode ? 'btn-outline-light' : 'btn-outline-primary';
+        },
+
+        resetToMenu() {
+            this.selectedLevel = null;
+            this.currentQuestion = null;
         }
     }
 });
