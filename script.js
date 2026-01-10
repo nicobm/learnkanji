@@ -79,8 +79,7 @@ new Vue({
         allWordsData: {}, 
         vocabByLevelCache: {}, 
         
-        // Estado UI
-        darkMode: false,
+        // Estado UI (Dark mode es automático por CSS ahora)
         selectedLevel: null,
         quizMode: 'kanji',
         availableParts: [],
@@ -117,28 +116,25 @@ new Vue({
             return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
         }
     },
-    watch: {
-        darkMode(val) {
-            document.documentElement.setAttribute('data-bs-theme', val ? 'dark' : 'light');
-            localStorage.setItem('theme', val ? 'dark' : 'light');
-        }
-    },
     created() {
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-            this.darkMode = savedTheme === 'dark';
-        } else {
-            this.darkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        }
-        
+        this.initTheme();
         this.loadData();
     },
     methods: {
+        // Lógica de tema idéntica a Python App (Bootstrap nativo)
+        initTheme() {
+            const updateTheme = () => {
+                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
+            };
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateTheme);
+            updateTheme(); // Ejecutar al inicio
+        },
+
         async loadData() {
             this.loadingData = true;
             this.jsonLoadError = null;
             try {
-                // Fetch al archivo JSON estático
                 const response = await fetch('kanjiapi_small.json');
                 if (!response.ok) throw new Error("No se pudo cargar 'kanjiapi_small.json' (Estado: " + response.status + ")");
                 
@@ -258,8 +254,8 @@ new Vue({
                         colorClass: JLPT_LEVEL_COLORS[lvlStr] || 'btn-secondary',
                         kanjiList: kanjisInLevel, 
                         kpp: kpp,
-                        partNum: i,
-                        fullVocab: flatVocab 
+                        fullVocab: flatVocab,
+                        partNum: i
                     });
                 }
             });
@@ -440,6 +436,7 @@ new Vue({
             this.incorrectlySelectedOptions = [];
             this.currentQuestion = this.quizQueue[index];
             this.options = this.currentQuestion.options;
+            this.$forceUpdate();
         },
 
         checkAnswer(option) {
@@ -447,17 +444,19 @@ new Vue({
 
             if (option.value === this.currentQuestion.correct_value) {
                 this.answeredCorrectly = true;
-                setTimeout(() => {
-                    if (this.currentItemOrderIndex < this.totalItemsInLevel - 1) {
-                        this.currentItemOrderIndex++;
-                        this.loadQuestion(this.currentItemOrderIndex);
-                    } else {
-                        alert("¡Nivel Completado!");
-                        this.resetToMenu();
-                    }
-                }, 1500); 
+                // No hay timeout, esperamos click en siguiente
             } else {
                 this.incorrectlySelectedOptions.push(option.value);
+            }
+        },
+
+        nextQuestion() {
+            if (this.currentItemOrderIndex < this.totalItemsInLevel - 1) {
+                this.currentItemOrderIndex++;
+                this.loadQuestion(this.currentItemOrderIndex);
+            } else {
+                alert("¡Nivel Completado!");
+                this.resetToMenu();
             }
         },
 
@@ -468,7 +467,8 @@ new Vue({
             if (this.incorrectlySelectedOptions.includes(option.value)) {
                 return 'btn-danger shake';
             }
-            return this.darkMode ? 'btn-outline-light' : 'btn-outline-primary';
+            // Aquí usamos btn-outline-primary y dejamos que Bootstrap maneje el dark mode
+            return 'btn-outline-primary';
         },
 
         resetToMenu() {
