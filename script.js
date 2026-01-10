@@ -394,7 +394,15 @@ new Vue({
         },
 
         getButtonClass(option) {
+            // 1. Si ya se mostró el feedback correcto (el usuario ganó) y esta es la opción correcta: VERDE
+            if (this.showImmediateCorrectFeedback && option.value === this.currentQuestion.correct_value) {
+                return 'btn-success';
+            }
+            
+            // 2. Si es una opción que el usuario marcó incorrectamente antes: ROJO (con animación)
             if (this.incorrectlySelectedOptions.includes(option.value)) return 'btn-danger';
+            
+            // 3. Estado normal
             return 'btn-outline-primary';
         },
         
