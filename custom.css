@@ -1,0 +1,242 @@
+/* --- Fuentes e Importaciones --- */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Rubik:wght@300;400;500;700&display=swap');
+
+:root {
+    --primary-color: #4f46e5;
+    --primary-hover: #4338ca;
+    --bg-app: #f3f4f6;
+    --card-bg: #ffffff;
+    --text-main: #1f2937;
+    --text-muted: #6b7280;
+    --accent-success: #10b981;
+    --accent-error: #ef4444;
+    --font-ui: 'Rubik', sans-serif;
+    --font-jp: 'Noto Sans JP', sans-serif;
+    --radius-lg: 1rem;
+    --radius-md: 0.75rem;
+    --shadow-soft: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+    --shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+[data-bs-theme="dark"] {
+    --bg-app: #111827;
+    --card-bg: #1f2937;
+    --text-main: #f9fafb;
+    --text-muted: #9ca3af;
+    --primary-color: #6366f1;
+    --primary-hover: #818cf8;
+}
+
+body {
+    font-family: var(--font-ui);
+    background-color: var(--bg-app);
+    color: var(--text-main);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* --- Tipografía Japonesa --- */
+.font-jp { font-family: var(--font-jp); }
+
+/* --- Tarjetas y Contenedores --- */
+.card {
+    background-color: var(--card-bg);
+    border: none;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-level-select:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-hover);
+}
+
+.card-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    font-weight: 600;
+    padding: 1rem 1.25rem;
+}
+
+/* --- Pantalla de Selección de Nivel --- */
+.level-badge {
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: rgba(79, 70, 229, 0.1);
+    color: var(--primary-color);
+    margin: 0 auto 1rem auto;
+}
+
+[data-bs-theme="dark"] .level-badge {
+    background-color: rgba(99, 102, 241, 0.2);
+}
+
+/* --- Área del Kanji Principal (AJUSTADO DESKTOP) --- */
+#kanji-display-char {
+    /* Reducido un 25% (era 200px) */
+    min-height: 150px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.display-kanji {
+    font-family: var(--font-jp);
+    font-weight: 500;
+    /* Aumentado al DOBLE (era 6rem) */
+    font-size: 12rem;
+    color: var(--text-main);
+    /* Line-height ajustado para que la letra gigante no descuadre */
+    line-height: 0.9;
+}
+@media (min-width: 768px) {
+    .display-kanji { 
+        /* Aumentado al DOBLE (era 8rem) */
+        font-size: 16rem; 
+    }
+}
+
+/* --- Botones de Opción --- */
+.btn-option {
+    border: 2px solid rgba(0,0,0,0.1);
+    background-color: var(--card-bg);
+    color: var(--text-main);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+/* --- Aumento del 25% en textos de botones para DESKTOP --- */
+.btn-option .fs-4 { font-size: 1.9rem !important; } /* Base ~1.5rem + 25% */
+.btn-option .fs-5 { font-size: 1.6rem !important; } /* Base ~1.25rem + 25% */
+.btn-option .small { font-size: 1.1rem !important; } /* Base ~0.875rem + 25% */
+
+[data-bs-theme="dark"] .btn-option {
+    border-color: rgba(255,255,255,0.1);
+}
+
+.btn-option:hover:not(:disabled) {
+    border-color: var(--primary-color);
+    background-color: rgba(79, 70, 229, 0.05);
+    transform: translateY(-2px);
+}
+
+.btn-option.btn-success {
+    background-color: var(--accent-success) !important;
+    border-color: var(--accent-success) !important;
+    color: white !important;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.btn-option.btn-danger {
+    background-color: var(--card-bg) !important;
+    border-color: var(--accent-error) !important;
+    color: var(--accent-error) !important;
+    opacity: 0.8;
+}
+
+.btn-option.btn-outline-secondary.disabled {
+    opacity: 0.5;
+    background-color: transparent;
+}
+
+/* --- Barra de Progreso --- */
+.progress {
+    background-color: rgba(0,0,0,0.05);
+    border-radius: 2rem;
+    height: 0.8rem !important;
+}
+.progress-bar {
+    background-color: var(--primary-color);
+    border-radius: 2rem;
+}
+
+/* --- Botones Generales --- */
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 1.25rem;
+    font-weight: 500;
+}
+.btn-primary:hover {
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+/* --- Animaciones --- */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+.fade-enter, .fade-leave-to { opacity: 0; }
+
+/* --- MODO COMPACTO PARA MÓVILES (Optimizado y ajustado) --- */
+@media (max-width: 768px) {
+    #app.container {
+        padding-top: 0.25rem !important;
+        padding-bottom: 0.25rem !important;
+    }
+
+    /* Ajuste de la tarjeta contenedora del Kanji */
+    #kanji-display-char {
+        min-height: 0 !important;
+        flex-grow: 0 !important; 
+        /* Reducido 25% (era 25vh -> 18.75vh) */
+        height: 19vh; 
+        overflow: visible; 
+    }
+    
+    /* Kanji/Vocab: DOBLE DE TAMAÑO */
+    .display-kanji {
+        /* Clamp duplicado: de (2.5, 7vh, 4) a (5, 14vh, 8) */
+        font-size: clamp(5rem, 14vh, 8rem); 
+        line-height: 0.9;
+    }
+
+    /* AJUSTE DE BOTONES */
+    .btn-option {
+        padding: 0.5rem !important; 
+        display: flex !important;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 5rem; 
+    }
+    
+    /* Texto principal (Hiragana) - Aumentado un 25% extra sobre la versión móvil */
+    .btn-option .fs-4 {
+        /* De 1.35rem a 1.7rem */
+        font-size: 1.7rem !important; 
+        margin-bottom: 0.2rem;
+        line-height: 1.2;
+    }
+    
+    /* Texto secundario (Katakana/On'yomi) - Aumentado un 25% extra */
+    .btn-option .small {
+        /* De 0.85rem a 1.06rem */
+        font-size: 1.06rem !important;
+        opacity: 0.9;
+        display: block;
+    }
+
+    /* Vocabulario (Kotoba) - Aumentado un 25% extra */
+    .btn-option .fs-5 {
+        /* De 1.1rem a 1.4rem */
+        font-size: 1.4rem !important;
+    }
+
+    /* Ajustes de espaciado para compensar el tamaño gigante */
+    .mb-4, .mb-5 { margin-bottom: 0.5rem !important; }
+    .mb-3 { margin-bottom: 0.25rem !important; }
+    .mb-2 { margin-bottom: 0.25rem !important; }
+
+    .card-body { padding: 0.5rem !important; }
+    
+    .row.g-2 { --bs-gutter-y: 0.4rem; --bs-gutter-x: 0.4rem; }
+
+    h3.fw-bold { font-size: 1.25rem; }
+    .progress { height: 0.4rem !important; }
+}
