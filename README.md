@@ -1,0 +1,11 @@
+### test locally
+
+1. download everything in a dir
+
+2.
+```
+cd <dir>
+python -m http.server
+```
+3.
+`firefox http://localhost:8000`
