@@ -32,7 +32,6 @@ function cleanReadings(readings) {
 }
 
 function getReadingLength(str) {
-    // Counts characters visually (ignoring the okurigana dot)
     return str.replace('.', '').length;
 }
 
@@ -89,7 +88,6 @@ new Vue({
             return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
         },
         
-        // --- ACCURACY / HP LOGIC ---
         currentAccuracy() {
             if (this.totalItemsInLevel === 0) return 100;
             
@@ -130,7 +128,6 @@ new Vue({
                 
                 const data = await response.json();
                 
-                // Process Kanjis
                 const rawKanjis = data.k || {};
                 const processedKanjis = {};
                 
@@ -258,7 +255,6 @@ new Vue({
                 
                 let corrVal = "", corrType = "", dispComp = "", targetKunLen = 0, targetOnLen = 0;
                 
-                // Determine Correct Answer
                 if (kuns.length > 0) {
                     corrVal = kuns[0].split('.')[0]; 
                     corrType = 'kun'; 
@@ -269,7 +265,6 @@ new Vue({
                     dispComp = ons[0];
                 } else return null;
 
-                // Calculate visual length target (e.g., "itsu" = 2)
                 targetKunLen = kuns.length > 0 ? getReadingLength(kuns[0]) : 0;
                 targetOnLen = ons.length > 0 ? getReadingLength(ons[0]) : 0;
 
@@ -298,12 +293,10 @@ new Vue({
             const needed = NUM_QUIZ_OPTIONS - 1;
             const candidates = levelList.filter(k => k !== correctChar);
             
-            // Buckets for distractor quality
-            const perfectMatches = []; // Same Kun Length AND Same On Length (Tier S)
-            const strongMatches = [];  // Same Kun Length OR Same On Length (Tier A)
-            const looseMatches = [];   // +/- 1 character length (Tier B)
+            const perfectMatches = []; 
+            const strongMatches = [];  
+            const looseMatches = [];   
             
-            // Optimization: Linear Scan with Random Start
             const startIndex = Math.floor(Math.random() * candidates.length);
             
             for (let i = 0; i < candidates.length; i++) {
@@ -318,7 +311,6 @@ new Vue({
                 let dVal = "", dKunDisplay = "-", dOnDisplay = "-";
                 let dKunLen = 0, dOnLen = 0;
 
-                // Extract potential readings from candidate
                 if (dk.length > 0) {
                     dVal = dk[0].split('.')[0];
                     dKunDisplay = dk[0].replace('.', '');
@@ -333,55 +325,42 @@ new Vue({
                     if (!dVal) dVal = kata2hira(do_[0]); 
                 }
 
-                // Validity Check
                 if (!dVal || dVal === correctVal) continue;
                 if (distractors.some(opt => opt.value === dVal)) continue;
 
                 const distObj = { value: dVal, display_kun: dKunDisplay, display_on_kata: dOnDisplay };
                 
-                // --- TRICKY LOGIC START ---
-                // Calculate visual difference
                 const kunDiff = Math.abs(dKunLen - targetKunLen);
                 const onDiff = Math.abs(dOnLen - targetOnLen);
 
-                // Priority 1: EXACT Visual Match (Both Kun & On are same length)
                 if (kunDiff === 0 && onDiff === 0) {
                     perfectMatches.push(distObj);
                 } 
-                // Priority 2: Primary Reading Exact Match
                 else if ((type === 'kun' && kunDiff === 0) || (type === 'on' && onDiff === 0)) {
                     strongMatches.push(distObj);
                 }
-                // Priority 3: Close enough (if we run out of perfect matches)
                 else if (kunDiff <= 1 || onDiff <= 1) {
                     looseMatches.push(distObj);
                 }
-                // --- TRICKY LOGIC END ---
 
-                // If we have enough perfect matches, we can stop early
                 if (perfectMatches.length >= needed) break;
             }
 
-            // Fill distractors by priority
             distractors.push(...perfectMatches);
             
             if (distractors.length < needed) {
-                // If not enough perfect matches, take strong matches
                 const neededStrong = needed - distractors.length;
                 distractors.push(...strongMatches.slice(0, neededStrong));
             }
             
             if (distractors.length < needed) {
-                // If still not enough, take loose matches
                 const neededLoose = needed - distractors.length;
                 distractors.push(...looseMatches.slice(0, neededLoose));
             }
 
-            // Fallback: If dictionary is too small or weird edge case, fill with whatever candidate remains
             if (distractors.length < needed) {
                 for (let i = 0; i < candidates.length; i++) {
                     if (distractors.length >= needed) break;
-                    // ... (simplified extraction for fallback) ...
                     const char = candidates[i];
                     const d = this.allKanjiData[char];
                     if(!d) continue;
@@ -398,7 +377,6 @@ new Vue({
                 }
             }
             
-            // Slice ensuring we don't exceed needed (in case arrays were huge) and shuffle
             const finalDistractors = distractors.slice(0, needed);
             return shuffleArray([correctOpt, ...finalDistractors]);
         },
@@ -411,16 +389,13 @@ new Vue({
                 const targetLen = w.reading.length;
                 let validCandidates = pool.filter(x => x.reading !== w.reading);
                 
-                // Priority 1: EXACT Length (Maximum Confusion)
                 let smartDistractors = validCandidates.filter(x => x.len === targetLen);
                 
-                // Priority 2: Length +/- 1 (Only if we don't have enough exact matches)
                 if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) {
                     const loose = validCandidates.filter(x => Math.abs(x.len - targetLen) === 1);
                     smartDistractors = smartDistractors.concat(loose);
                 }
                 
-                // Priority 3: Anything else (Last resort)
                 if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) {
                     smartDistractors = validCandidates; 
                 }
@@ -462,15 +437,15 @@ new Vue({
             if (this.showImmediateCorrectFeedback) return;
 
             if (option.value === this.currentQuestion.correct_value) {
+                // CORRECTO: Solo cambiamos la bandera, Vue se encarga del CSS
                 this.showImmediateCorrectFeedback = true;
                 this.correctCount++;
                 const itemKey = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
                 this.completedSessionItems.add(itemKey);
             } else {
+                // INCORRECTO: Shake
                 this.incorrectlySelectedOptions.push(option.value);
                 this.wrongCount++;
-                
-                // Trigger button shake
                 this.shakingBtnValue = option.value;
                 setTimeout(() => { this.shakingBtnValue = null; }, 500);
             }
@@ -487,7 +462,7 @@ new Vue({
 
         getButtonClass(option) {
             if (this.showImmediateCorrectFeedback && option.value === this.currentQuestion.correct_value) {
-                return 'btn-success';
+                return 'btn-success'; // Se mantiene verde
             }
             if (this.incorrectlySelectedOptions.includes(option.value)) return 'btn-danger';
             return 'btn-outline-primary';
