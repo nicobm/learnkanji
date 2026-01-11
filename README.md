@@ -2,12 +2,8 @@ eats data from https://kanjiapi.dev
 
 ### test locally
 
-1. download everything in a dir
+`python3 optimizejson.py kanjiapi_full.json`
 
-2.
-```
-cd <dir>
-python3 -m http.server
-```
-3.
+`python3 -m http.server`
+
 `firefox http://localhost:8000`
