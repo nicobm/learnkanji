@@ -175,6 +175,10 @@ new Vue({
                     const word = entry.variants[0].written;
                     const reading = entry.variants[0].pronounced;
                     
+                    // --- MODIFICACIÓN 1: Match Python (web.py:253) ---
+                    // Filtrar lecturas con espacios o la partícula 'を'
+                    if (reading.includes(' ') || reading.includes('を')) continue;
+
                     let minLevel = null;
                     // Bucle corto (largo de palabra), no afecta mucho
                     for (const char of word) {
@@ -187,7 +191,19 @@ new Vue({
                     }
                     if (minLevel === null) continue;
 
-                    const uniqueKey = `${word}|${reading}`;
+                    // --- MODIFICACIÓN 2: Match Python (web.py:258) ---
+                    // Incluir el primer significado en la clave única para diferenciar homónimos
+                    let firstGloss = "";
+                    if (entry.meanings && Array.isArray(entry.meanings)) {
+                        for (const m of entry.meanings) {
+                             if (m.glosses && m.glosses.length > 0) {
+                                 firstGloss = m.glosses[0];
+                                 break; // Tomamos solo el primer gloss encontrado, igual que Python all_glosses[0]
+                             }
+                        }
+                    }
+
+                    const uniqueKey = `${word}|${reading}|${firstGloss}`;
                     if (uniqueSet.has(uniqueKey)) continue;
                     uniqueSet.add(uniqueKey);
 
@@ -223,8 +239,7 @@ new Vue({
                 
                 const numParts = Math.ceil(kanjisInLevel.length / kpp);
                 
-                // --- Optimización Crítica aquí ---
-                // En lugar de recalcular filtros, usamos el cache directo
+                // Usamos el cache directo
                 const vocabGroups = this.vocabByLevelCache[lvlNum] || {};
                 let validVocab = [];
                 
@@ -232,15 +247,9 @@ new Vue({
                 const allWordsInLevel = Object.values(vocabGroups).flat();
                 
                 // Filtramos palabras que tengan suficientes distractores
-                // IMPORTANTE: Ahora miramos el tamaño del grupo en vocabGroups, es O(1)
                 validVocab = allWordsInLevel.filter(w => {
                     const ending = getOkuriganaEnding(w.word);
                     const group = vocabGroups[ending];
-                    // Simplemente chequeamos si el grupo tiene suficientes palabras
-                    // con longitud de lectura similar. Esto es mucho más rápido.
-                    // (Aproximación: si el grupo tiene >= 6 items, asumimos que es viable.
-                    //  Para precisión total, habría que filtrar por longitud, pero eso era lo que congelaba.
-                    //  Esta aproximación es suficiente para cargar la UI).
                     return group && group.length >= NUM_QUIZ_OPTIONS; 
                 });
 
