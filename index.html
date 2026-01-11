@@ -25,6 +25,18 @@
             30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
             40%, 60% { transform: translate3d(4px, 0, 0); }
         }
+
+        /* --- SOLUCIÓN SPOILER --- */
+        .meaning-box {
+            opacity: 0;
+            /* IMPORTANTE: Cuando se oculta, lo hace INSTANTÁNEAMENTE para evitar spoilers */
+            transition: none; 
+        }
+        .meaning-box.visible {
+            opacity: 1;
+            /* Solo animamos cuando aparece */
+            transition: opacity 0.3s ease-in-out; 
+        }
     </style>
 </head>
 <body class="bg-light d-flex flex-column min-vh-100 font-sans-serif">
@@ -105,9 +117,9 @@
                                     {{ quizMode === 'kanji' ? currentQuestion.kanji : currentQuestion.word }}
                                 </h1>
                                 
-                                <div class="w-100 px-3 d-flex flex-column justify-content-center" 
-                                     style="min-height: 4rem; transition: opacity 0.2s ease-in-out;"
-                                     :class="showImmediateCorrectFeedback ? 'opacity-100' : 'opacity-0'">
+                                <div class="meaning-box w-100 px-3 d-flex flex-column justify-content-center" 
+                                     style="min-height: 4rem;"
+                                     :class="{ 'visible': showImmediateCorrectFeedback }">
                                     
                                     <h3 class="text-primary fw-normal mb-1">{{ currentMeaning }}</h3>
                                     <div v-if="currentQuestion.correct_contextual_reading" class="text-muted fs-5 font-jp mt-1">
