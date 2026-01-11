@@ -32,9 +32,11 @@ function getOkuriganaEnding(word) {
     return ending;
 }
 
+// CORRECCIÓN APLICADA AQUÍ: Se eliminó .sort() para respetar la relevancia del JSON
 function cleanReadings(readings) {
     if (!readings) return [];
-    return [...new Set(readings.map(r => r ? r.replace(/^-|-$/g, '') : '').filter(Boolean))].sort();
+    // Mantenemos el orden original (filtro + unique set) pero SIN ordenar alfabéticamente
+    return [...new Set(readings.map(r => r ? r.replace(/^-|-$/g, '') : '').filter(Boolean))];
 }
 
 // Función de pausa para liberar el hilo principal (evita que el navegador se congele)
@@ -175,7 +177,6 @@ new Vue({
                     const word = entry.variants[0].written;
                     const reading = entry.variants[0].pronounced;
                     
-                    // --- MODIFICACIÓN 1: Match Python (web.py:253) ---
                     // Filtrar lecturas con espacios o la partícula 'を'
                     if (reading.includes(' ') || reading.includes('を')) continue;
 
@@ -191,14 +192,13 @@ new Vue({
                     }
                     if (minLevel === null) continue;
 
-                    // --- MODIFICACIÓN 2: Match Python (web.py:258) ---
                     // Incluir el primer significado en la clave única para diferenciar homónimos
                     let firstGloss = "";
                     if (entry.meanings && Array.isArray(entry.meanings)) {
                         for (const m of entry.meanings) {
                              if (m.glosses && m.glosses.length > 0) {
                                  firstGloss = m.glosses[0];
-                                 break; // Tomamos solo el primer gloss encontrado, igual que Python all_glosses[0]
+                                 break; 
                              }
                         }
                     }
@@ -346,7 +346,6 @@ new Vue({
         generateVocabQuiz(part) {
             const queue = part.fullVocabPart.map(w => {
                 const pool = this.vocabByLevelCache[parseInt(part.originalLevel.replace('jlpt',''))][getOkuriganaEnding(w.word)] || [];
-                // Aquí el filtro es seguro porque 'pool' es pequeño (solo palabras con ese ending)
                 const dists = pool.filter(x => x.reading !== w.reading && x.reading.length === w.reading.length);
                 if (dists.length < NUM_QUIZ_OPTIONS - 1) return null;
 
@@ -403,15 +402,10 @@ new Vue({
         },
 
         getButtonClass(option) {
-            // 1. Si ya se mostró el feedback correcto (el usuario ganó) y esta es la opción correcta: VERDE
             if (this.showImmediateCorrectFeedback && option.value === this.currentQuestion.correct_value) {
                 return 'btn-success';
             }
-            
-            // 2. Si es una opción que el usuario marcó incorrectamente antes: ROJO (con animación)
             if (this.incorrectlySelectedOptions.includes(option.value)) return 'btn-danger';
-            
-            // 3. Estado normal
             return 'btn-outline-primary';
         },
         
