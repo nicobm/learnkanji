@@ -1,15 +1,9 @@
-// Constantes de configuración
+// Configuration Constants
 const MAX_KANJI_PER_PART_DEFAULT = 45;
 const TARGET_PARTS_JLPT_N1 = 9;
-const NUM_QUIZ_OPTIONS = 6;
+const NUM_QUIZ_OPTIONS = 6; 
 
-// Configuración de dificultad (Solo para referencia visual de niveles)
-const JLPT_LEVEL_COLORS = {
-    'jlpt5': 'btn-success', 'jlpt4': 'btn-info', 'jlpt3': 'btn-warning text-dark',
-    'jlpt2': 'btn-danger', 'jlpt1': 'btn-secondary',
-};
-
-// --- Helpers ---
+// Helpers
 function kata2hira(str) {
     return str.replace(/[\u30a1-\u30f6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
 }
@@ -37,20 +31,21 @@ function cleanReadings(readings) {
     return [...new Set(readings.map(r => r ? r.replace(/^-|-$/g, '') : '').filter(Boolean))];
 }
 
-// Función de pausa
+function getReadingLength(str) {
+    // Counts characters visually (ignoring the okurigana dot)
+    return str.replace('.', '').length;
+}
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 new Vue({
     el: '#app',
     data: {
         loadingData: true,
-        loadingMessage: "Iniciando...",
+        loadingMessage: "Initializing...",
         jsonLoadError: null,
         
         allKanjiData: {}, 
-        // allWordsData ya no es estrictamente necesario globalmente con la nueva lógica, 
-        // pero lo mantenemos por si acaso o para depuración.
-        allWordsData: {}, 
         vocabByLevelCache: {}, 
         
         selectedLevel: null,
@@ -62,7 +57,7 @@ new Vue({
         options: [],
         
         currentItemOrderIndex: 0,
-        totalItemsInLevel: 0,
+        totalItemsInLevel: 1,
         
         isLoading: false,
         showImmediateCorrectFeedback: false, 
@@ -70,7 +65,9 @@ new Vue({
         
         completedSessionItems: new Set(),
         correctCount: 0,
-        wrongCount: 0
+        wrongCount: 0,
+        
+        shakingBtnValue: null 
     },
     computed: {
         orderedGroupedParts() {
@@ -84,39 +81,39 @@ new Vue({
             });
             return Object.values(groups).sort((a, b) => b.levelKey - a.levelKey);
         },
-        kanjiListForLevel() {
-            if (!this.selectedLevel) return [];
-            return this.selectedLevel.kanjiList;
-        },
-        kotobaListForLevel() {
-            if (!this.selectedLevel) return [];
-            return this.selectedLevel.fullVocabPart;
-        },
-        currentCorrectContextualReading() {
-            return this.currentQuestion ? this.currentQuestion.correct_contextual_reading : '';
-        },
         currentMeaning() {
             return this.currentQuestion ? this.currentQuestion.meaning : '';
-        },
-        currentJapaneseMeaningKanjiForm() {
-            if (!this.currentQuestion) return '';
-            if (this.quizMode === 'kotoba') return '';
-            return this.currentQuestion.kanji;
         },
         progressPercentage() {
             if (this.totalItemsInLevel === 0) return 0;
             return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
         },
-        levelTrulyCompleted() {
-            return this.currentItemOrderIndex >= this.totalItemsInLevel - 1 && this.showImmediateCorrectFeedback;
+        
+        // --- ACCURACY / HP LOGIC ---
+        currentAccuracy() {
+            if (this.totalItemsInLevel === 0) return 100;
+            
+            const wrongOptionsPerQuestion = NUM_QUIZ_OPTIONS - 1;
+            const totalLifePoints = this.totalItemsInLevel * wrongOptionsPerQuestion;
+            
+            if (totalLifePoints === 0) return 100;
+
+            const currentLife = totalLifePoints - this.wrongCount;
+            const percentage = (currentLife / totalLifePoints) * 100;
+            
+            return Math.max(0, Math.min(100, Math.round(percentage)));
         },
-        winLossRatio() {
-            const total = this.correctCount + this.wrongCount;
-            return total === 0 ? 0 : Math.round((this.correctCount / total) * 100);
+        
+        accuracyColorClass() {
+            const acc = this.currentAccuracy;
+            if (acc >= 70) return 'bg-success'; 
+            if (acc >= 40) return 'bg-warning'; 
+            return 'bg-danger';                 
         },
-        winLossColor() {
-            if (this.winLossRatio >= 80) return 'text-success';
-            if (this.winLossRatio >= 50) return 'text-warning';
+        accuracyColorText() {
+            const acc = this.currentAccuracy;
+            if (acc >= 70) return 'text-success';
+            if (acc >= 40) return 'text-warning';
             return 'text-danger';
         }
     },
@@ -126,20 +123,14 @@ new Vue({
     methods: {
         async loadData() {
             this.loadingData = true;
-            this.jsonLoadError = null;
-
             try {
-                this.loadingMessage = "Descargando diccionario optimizado...";
+                this.loadingMessage = "Loading dictionary...";
                 const response = await fetch('kanjiapi_small.json');
-                if (!response.ok) throw new Error("Error HTTP: " + response.status);
+                if (!response.ok) throw new Error("HTTP Error: " + response.status);
                 
-                this.loadingMessage = "Desempaquetando datos...";
-                await sleep(50);
                 const data = await response.json();
                 
-                // --- 1. PROCESAR KANJIS (key "k") ---
-                // Formato Small: "一": [5, 1, 1, "meaning", [kun], [on]]
-                // Lo convertimos al objeto que tu app espera.
+                // Process Kanjis
                 const rawKanjis = data.k || {};
                 const processedKanjis = {};
                 
@@ -147,18 +138,13 @@ new Vue({
                     const info = rawKanjis[char];
                     processedKanjis[char] = {
                         jlpt: info[0],
-                        grade: info[1],
-                        strokes: info[2],
-                        // Convertimos string "significado1; significado2" a array para mantener compatibilidad
                         meanings: info[3] ? info[3].split(';').map(s=>s.trim()) : [],
                         kun_readings: info[4] || [],
                         on_readings: info[5] || []
                     };
                 });
-                
                 this.allKanjiData = processedKanjis;
                 
-                // Pasamos la data "v" cruda a preloadVocabulary para procesarla allí
                 await this.preloadVocabulary(data.v || {});
                 await this.generatePartsList();
 
@@ -171,72 +157,46 @@ new Vue({
         },
 
         async preloadVocabulary(rawVocabData) {
-            // rawVocabData es data.v -> { "5": { "grupoclave": [ [palabra, lectura, significado], ... ] }, "4": ... }
-            
             const levels = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}};
-            
-            // Iteramos por los niveles que ya vienen en el JSON (gran ventaja del optimizador)
-            const availableLevels = Object.keys(rawVocabData); // ["1", "2", "3", "4", "5"]
-            
-            let totalWordsProcessed = 0;
+            const availableLevels = Object.keys(rawVocabData);
             
             for (const lvlKey of availableLevels) {
                 const lvlNum = parseInt(lvlKey);
-                if (!levels[lvlNum]) levels[lvlNum] = {}; // seguridad
+                if (!levels[lvlNum]) levels[lvlNum] = {};
                 
-                const groups = rawVocabData[lvlKey]; // Objeto con grupos
-                
-                // Recorremos los grupos dentro del nivel
+                const groups = rawVocabData[lvlKey];
                 for (const groupKey in groups) {
-                    const wordsArray = groups[groupKey]; // Array de arrays
-                    
+                    const wordsArray = groups[groupKey];
                     for (const wEntry of wordsArray) {
-                        // wEntry es [ "Palabra", "Lectura", "Significado" ]
                         const word = wEntry[0];
                         const reading = wEntry[1];
                         const meaningStr = wEntry[2];
 
-                        // Filtros originales de tu script
                         if (reading.includes(' ') || reading.includes('を')) continue;
-
-                        // Tu app espera una estructura de meanings compleja: w.meanings[0].glosses
-                        // Lo simulamos para no romper el resto del código
-                        const meaningsObject = [{ glosses: [meaningStr] }];
-
-                        // Usamos tu lógica de Okurigana para agrupar distractores
+                        
                         const ending = getOkuriganaEnding(word);
                         if (!levels[lvlNum][ending]) levels[lvlNum][ending] = [];
                         
                         levels[lvlNum][ending].push({
                             word: word,
                             reading: reading,
-                            meanings: meaningsObject
+                            len: reading.length, 
+                            meanings: [{ glosses: [meaningStr] }]
                         });
-                        
-                        totalWordsProcessed++;
                     }
                 }
-                
-                // Actualización visual UI
-                this.loadingMessage = `Procesando vocabulario N${lvlKey}...`;
-                await sleep(10);
+                if (lvlNum % 2 === 0) await sleep(5);
             }
-
-            console.log(`Vocabulario total cargado: ${totalWordsProcessed}`);
             this.vocabByLevelCache = levels;
         },
 
         async generatePartsList() {
-            this.loadingMessage = "Generando niveles...";
-            await sleep(50);
-
             const parts = [];
             const levels = ['jlpt5', 'jlpt4', 'jlpt3', 'jlpt2', 'jlpt1'];
 
             for (const lvlStr of levels) {
                 const lvlNum = parseInt(lvlStr.replace('jlpt', ''));
                 
-                // Obtener Kanjis (ahora allKanjiData ya tiene la propiedad .jlpt gracias a loadData)
                 const kanjisInLevel = Object.keys(this.allKanjiData)
                     .filter(k => this.allKanjiData[k].jlpt === lvlNum)
                     .sort();
@@ -247,14 +207,9 @@ new Vue({
                 if (lvlStr === 'jlpt1') kpp = Math.max(1, Math.ceil(kanjisInLevel.length / TARGET_PARTS_JLPT_N1));
                 
                 const numParts = Math.ceil(kanjisInLevel.length / kpp);
-                
-                // Usamos el cache que llenamos en preloadVocabulary
                 const vocabGroups = this.vocabByLevelCache[lvlNum] || {};
-                
-                // Aplanamos grupos para obtener lista lineal
                 const allWordsInLevel = Object.values(vocabGroups).flat();
                 
-                // Filtramos palabras que tengan suficientes distractores (Lógica original)
                 const validVocab = allWordsInLevel.filter(w => {
                     const ending = getOkuriganaEnding(w.word);
                     const group = vocabGroups[ending];
@@ -265,16 +220,14 @@ new Vue({
 
                 for (let i = 1; i <= numParts; i++) {
                     const startW = (i - 1) * wordsPerPart;
-                    const vocabPart = validVocab.slice(startW, startW + wordsPerPart);
-
                     parts.push({
                         id: `${lvlStr}_${i}`,
                         name: `JLPT N${lvlNum}`,
                         originalLevel: lvlStr,
                         count: kanjisInLevel.slice((i-1)*kpp, i*kpp).length,
-                        kotoba_count: vocabPart.length,
+                        kotoba_count: validVocab.slice(startW, startW + wordsPerPart).length,
                         kanjiList: kanjisInLevel.slice((i-1)*kpp, i*kpp),
-                        fullVocabPart: vocabPart,
+                        fullVocabPart: validVocab.slice(startW, startW + wordsPerPart),
                         partNum: i,
                         totalParts: numParts
                     });
@@ -303,23 +256,29 @@ new Vue({
                 const kuns = cleanReadings(d.kun_readings);
                 const ons = cleanReadings(d.on_readings);
                 
-                let corrHira = "", corrType = "", dispComp = "";
+                let corrVal = "", corrType = "", dispComp = "", targetKunLen = 0, targetOnLen = 0;
+                
+                // Determine Correct Answer
                 if (kuns.length > 0) {
-                    corrHira = kuns[0].split('.')[0]; 
+                    corrVal = kuns[0].split('.')[0]; 
                     corrType = 'kun'; 
                     dispComp = kuns[0].replace('.', '');
                 } else if (ons.length > 0) {
-                    corrHira = kata2hira(ons[0]); 
+                    corrVal = kata2hira(ons[0]); 
                     corrType = 'on'; 
                     dispComp = ons[0];
                 } else return null;
 
-                const opts = this.generateKanjiOptions(corrHira, corrType, dispComp, kuns, ons, part.kanjiList, char);
+                // Calculate visual length target (e.g., "itsu" = 2)
+                targetKunLen = kuns.length > 0 ? getReadingLength(kuns[0]) : 0;
+                targetOnLen = ons.length > 0 ? getReadingLength(ons[0]) : 0;
+
+                const opts = this.getSmartDistractors(char, corrVal, corrType, dispComp, kuns, ons, targetKunLen, targetOnLen, part.kanjiList);
                 
                 return {
                     kanji: char,
                     meaning: (d.meanings || []).slice(0, 3).join("; "),
-                    correct_value: corrHira,
+                    correct_value: corrVal,
                     correct_contextual_reading: dispComp,
                     options: opts
                 };
@@ -328,41 +287,153 @@ new Vue({
             this.startQuiz(queue);
         },
 
-        generateKanjiOptions(correctVal, type, displayComp, kuns, ons, levelList, currentChar) {
-            const opts = [{ value: correctVal, display_kun: type === 'kun' ? displayComp : (kuns[0] || '-'), display_on_kata: type === 'on' ? displayComp : (ons[0] || '-') }];
-            const pool = shuffleArray(levelList.filter(k => k !== currentChar));
+        getSmartDistractors(correctChar, correctVal, type, displayComp, kuns, ons, targetKunLen, targetOnLen, levelList) {
+            const correctOpt = { 
+                value: correctVal, 
+                display_kun: type === 'kun' ? displayComp : (kuns[0] || '-'), 
+                display_on_kata: type === 'on' ? displayComp : (ons[0] || '-') 
+            };
+            
+            const distractors = [];
+            const needed = NUM_QUIZ_OPTIONS - 1;
+            const candidates = levelList.filter(k => k !== correctChar);
+            
+            // Buckets for distractor quality
+            const perfectMatches = []; // Same Kun Length AND Same On Length (Tier S)
+            const strongMatches = [];  // Same Kun Length OR Same On Length (Tier A)
+            const looseMatches = [];   // +/- 1 character length (Tier B)
+            
+            // Optimization: Linear Scan with Random Start
+            const startIndex = Math.floor(Math.random() * candidates.length);
+            
+            for (let i = 0; i < candidates.length; i++) {
+                const idx = (startIndex + i) % candidates.length;
+                const char = candidates[idx];
+                const d = this.allKanjiData[char];
+                if(!d) continue;
 
-            for (const other of pool) {
-                if (opts.length >= NUM_QUIZ_OPTIONS) break;
-                const d = this.allKanjiData[other];
-                if (!d) continue;
-                
                 const dk = cleanReadings(d.kun_readings);
                 const do_ = cleanReadings(d.on_readings);
-                let dist = null;
+                
+                let dVal = "", dKunDisplay = "-", dOnDisplay = "-";
+                let dKunLen = 0, dOnLen = 0;
 
-                if (dk.length > 0) dist = { val: dk[0].split('.')[0], kun: dk[0].replace('.', ''), on: do_[0] || '-' };
-                else if (do_.length > 0) dist = { val: kata2hira(do_[0]), kun: '-', on: do_[0] };
+                // Extract potential readings from candidate
+                if (dk.length > 0) {
+                    dVal = dk[0].split('.')[0];
+                    dKunDisplay = dk[0].replace('.', '');
+                    dKunLen = getReadingLength(dk[0]);
+                } else if (do_.length > 0) {
+                    dVal = kata2hira(do_[0]);
+                }
 
-                if (dist && !opts.some(o => o.value === dist.val)) {
-                    opts.push({ value: dist.val, display_kun: dist.kun, display_on_kata: dist.on });
+                if (do_.length > 0) {
+                    dOnDisplay = do_[0];
+                    dOnLen = getReadingLength(do_[0]);
+                    if (!dVal) dVal = kata2hira(do_[0]); 
+                }
+
+                // Validity Check
+                if (!dVal || dVal === correctVal) continue;
+                if (distractors.some(opt => opt.value === dVal)) continue;
+
+                const distObj = { value: dVal, display_kun: dKunDisplay, display_on_kata: dOnDisplay };
+                
+                // --- TRICKY LOGIC START ---
+                // Calculate visual difference
+                const kunDiff = Math.abs(dKunLen - targetKunLen);
+                const onDiff = Math.abs(dOnLen - targetOnLen);
+
+                // Priority 1: EXACT Visual Match (Both Kun & On are same length)
+                if (kunDiff === 0 && onDiff === 0) {
+                    perfectMatches.push(distObj);
+                } 
+                // Priority 2: Primary Reading Exact Match
+                else if ((type === 'kun' && kunDiff === 0) || (type === 'on' && onDiff === 0)) {
+                    strongMatches.push(distObj);
+                }
+                // Priority 3: Close enough (if we run out of perfect matches)
+                else if (kunDiff <= 1 || onDiff <= 1) {
+                    looseMatches.push(distObj);
+                }
+                // --- TRICKY LOGIC END ---
+
+                // If we have enough perfect matches, we can stop early
+                if (perfectMatches.length >= needed) break;
+            }
+
+            // Fill distractors by priority
+            distractors.push(...perfectMatches);
+            
+            if (distractors.length < needed) {
+                // If not enough perfect matches, take strong matches
+                const neededStrong = needed - distractors.length;
+                distractors.push(...strongMatches.slice(0, neededStrong));
+            }
+            
+            if (distractors.length < needed) {
+                // If still not enough, take loose matches
+                const neededLoose = needed - distractors.length;
+                distractors.push(...looseMatches.slice(0, neededLoose));
+            }
+
+            // Fallback: If dictionary is too small or weird edge case, fill with whatever candidate remains
+            if (distractors.length < needed) {
+                for (let i = 0; i < candidates.length; i++) {
+                    if (distractors.length >= needed) break;
+                    // ... (simplified extraction for fallback) ...
+                    const char = candidates[i];
+                    const d = this.allKanjiData[char];
+                    if(!d) continue;
+                    const dk = cleanReadings(d.kun_readings);
+                    const do_ = cleanReadings(d.on_readings);
+                    let val = dk.length > 0 ? dk[0].split('.')[0] : (do_.length > 0 ? kata2hira(do_[0]) : null);
+                    if (val && val !== correctVal && !distractors.some(x => x.value === val)) {
+                         distractors.push({ 
+                             value: val, 
+                             display_kun: dk.length ? dk[0].replace('.','') : '-', 
+                             display_on_kata: do_.length ? do_[0] : '-' 
+                         });
+                    }
                 }
             }
-            return shuffleArray(opts);
+            
+            // Slice ensuring we don't exceed needed (in case arrays were huge) and shuffle
+            const finalDistractors = distractors.slice(0, needed);
+            return shuffleArray([correctOpt, ...finalDistractors]);
         },
 
         generateVocabQuiz(part) {
             const queue = part.fullVocabPart.map(w => {
-                const pool = this.vocabByLevelCache[parseInt(part.originalLevel.replace('jlpt',''))][getOkuriganaEnding(w.word)] || [];
-                const dists = pool.filter(x => x.reading !== w.reading && x.reading.length === w.reading.length);
-                if (dists.length < NUM_QUIZ_OPTIONS - 1) return null;
+                const ending = getOkuriganaEnding(w.word);
+                const pool = this.vocabByLevelCache[parseInt(part.originalLevel.replace('jlpt',''))][ending] || [];
+                
+                const targetLen = w.reading.length;
+                let validCandidates = pool.filter(x => x.reading !== w.reading);
+                
+                // Priority 1: EXACT Length (Maximum Confusion)
+                let smartDistractors = validCandidates.filter(x => x.len === targetLen);
+                
+                // Priority 2: Length +/- 1 (Only if we don't have enough exact matches)
+                if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) {
+                    const loose = validCandidates.filter(x => Math.abs(x.len - targetLen) === 1);
+                    smartDistractors = smartDistractors.concat(loose);
+                }
+                
+                // Priority 3: Anything else (Last resort)
+                if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) {
+                    smartDistractors = validCandidates; 
+                }
+                
+                if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) return null;
 
-                const opts = [{value: w.reading}, ...shuffleArray(dists).slice(0, NUM_QUIZ_OPTIONS-1).map(d => ({value: d.reading}))];
+                const selectedDists = shuffleArray(smartDistractors).slice(0, NUM_QUIZ_OPTIONS-1);
+                
+                const opts = [{value: w.reading}, ...selectedDists.map(d => ({value: d.reading}))];
                 
                 return {
                     word: w.word,
                     correct_value: w.reading,
-                    // Adaptado al formato simulado en preloadVocabulary: meanings[0].glosses
                     meaning: (w.meanings[0].glosses || []).join(", "),
                     options: shuffleArray(opts)
                 };
@@ -398,6 +469,10 @@ new Vue({
             } else {
                 this.incorrectlySelectedOptions.push(option.value);
                 this.wrongCount++;
+                
+                // Trigger button shake
+                this.shakingBtnValue = option.value;
+                setTimeout(() => { this.shakingBtnValue = null; }, 500);
             }
         },
 
