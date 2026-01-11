@@ -7,7 +7,7 @@ eats data from https://kanjiapi.dev
 2.
 ```
 cd <dir>
-python -m http.server
+python3 -m http.server
 ```
 3.
 `firefox http://localhost:8000`
