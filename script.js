@@ -32,14 +32,12 @@ function getOkuriganaEnding(word) {
     return ending;
 }
 
-// CORRECCIÓN APLICADA AQUÍ: Se eliminó .sort() para respetar la relevancia del JSON
 function cleanReadings(readings) {
     if (!readings) return [];
-    // Mantenemos el orden original (filtro + unique set) pero SIN ordenar alfabéticamente
     return [...new Set(readings.map(r => r ? r.replace(/^-|-$/g, '') : '').filter(Boolean))];
 }
 
-// Función de pausa para liberar el hilo principal (evita que el navegador se congele)
+// Función de pausa
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 new Vue({
@@ -50,6 +48,8 @@ new Vue({
         jsonLoadError: null,
         
         allKanjiData: {}, 
+        // allWordsData ya no es estrictamente necesario globalmente con la nueva lógica, 
+        // pero lo mantenemos por si acaso o para depuración.
         allWordsData: {}, 
         vocabByLevelCache: {}, 
         
@@ -129,20 +129,37 @@ new Vue({
             this.jsonLoadError = null;
 
             try {
-                this.loadingMessage = "Descargando diccionario...";
+                this.loadingMessage = "Descargando diccionario optimizado...";
                 const response = await fetch('kanjiapi_small.json');
                 if (!response.ok) throw new Error("Error HTTP: " + response.status);
                 
-                this.loadingMessage = "Leyendo datos...";
-                // Permitir que la UI se actualice antes de parsear el JSON grande
+                this.loadingMessage = "Desempaquetando datos...";
                 await sleep(50);
                 const data = await response.json();
                 
-                this.allKanjiData = data.kanjis || {};
-                this.allWordsData = data.words || {};
+                // --- 1. PROCESAR KANJIS (key "k") ---
+                // Formato Small: "一": [5, 1, 1, "meaning", [kun], [on]]
+                // Lo convertimos al objeto que tu app espera.
+                const rawKanjis = data.k || {};
+                const processedKanjis = {};
                 
-                // Ejecutamos las funciones pesadas con await para respetar los tiempos de carga
-                await this.preloadVocabulary();
+                Object.keys(rawKanjis).forEach(char => {
+                    const info = rawKanjis[char];
+                    processedKanjis[char] = {
+                        jlpt: info[0],
+                        grade: info[1],
+                        strokes: info[2],
+                        // Convertimos string "significado1; significado2" a array para mantener compatibilidad
+                        meanings: info[3] ? info[3].split(';').map(s=>s.trim()) : [],
+                        kun_readings: info[4] || [],
+                        on_readings: info[5] || []
+                    };
+                });
+                
+                this.allKanjiData = processedKanjis;
+                
+                // Pasamos la data "v" cruda a preloadVocabulary para procesarla allí
+                await this.preloadVocabulary(data.v || {});
                 await this.generatePartsList();
 
                 this.loadingData = false;
@@ -153,67 +170,59 @@ new Vue({
             }
         },
 
-        async preloadVocabulary() {
-            const levels = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}};
-            const uniqueSet = new Set();
+        async preloadVocabulary(rawVocabData) {
+            // rawVocabData es data.v -> { "5": { "grupoclave": [ [palabra, lectura, significado], ... ] }, "4": ... }
             
-            // Obtenemos todas las claves para poder iterar con índice
-            const wordKeys = Object.keys(this.allWordsData);
-            const total = wordKeys.length;
-            const batchSize = 2000; // Procesar de a 2000 palabras
-
-            for (let i = 0; i < total; i++) {
-                // Cada batchSize iteraciones, actualizamos UI y descansamos 10ms
-                if (i % batchSize === 0) {
-                    this.loadingMessage = `Analizando palabras... ${Math.round((i / total) * 100)}%`;
-                    await sleep(10);
-                }
-
-                const key = wordKeys[i];
-                const entries = this.allWordsData[key];
-                if (!Array.isArray(entries)) continue;
-
-                for (const entry of entries) {
-                    const word = entry.variants[0].written;
-                    const reading = entry.variants[0].pronounced;
+            const levels = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}};
+            
+            // Iteramos por los niveles que ya vienen en el JSON (gran ventaja del optimizador)
+            const availableLevels = Object.keys(rawVocabData); // ["1", "2", "3", "4", "5"]
+            
+            let totalWordsProcessed = 0;
+            
+            for (const lvlKey of availableLevels) {
+                const lvlNum = parseInt(lvlKey);
+                if (!levels[lvlNum]) levels[lvlNum] = {}; // seguridad
+                
+                const groups = rawVocabData[lvlKey]; // Objeto con grupos
+                
+                // Recorremos los grupos dentro del nivel
+                for (const groupKey in groups) {
+                    const wordsArray = groups[groupKey]; // Array de arrays
                     
-                    // Filtrar lecturas con espacios o la partícula 'を'
-                    if (reading.includes(' ') || reading.includes('を')) continue;
+                    for (const wEntry of wordsArray) {
+                        // wEntry es [ "Palabra", "Lectura", "Significado" ]
+                        const word = wEntry[0];
+                        const reading = wEntry[1];
+                        const meaningStr = wEntry[2];
 
-                    let minLevel = null;
-                    // Bucle corto (largo de palabra), no afecta mucho
-                    for (const char of word) {
-                        if (char >= '\u4e00' && char <= '\u9faf') {
-                            const kData = this.allKanjiData[char];
-                            if (kData && kData.jlpt) {
-                                if (minLevel === null || kData.jlpt < minLevel) minLevel = kData.jlpt;
-                            }
-                        }
+                        // Filtros originales de tu script
+                        if (reading.includes(' ') || reading.includes('を')) continue;
+
+                        // Tu app espera una estructura de meanings compleja: w.meanings[0].glosses
+                        // Lo simulamos para no romper el resto del código
+                        const meaningsObject = [{ glosses: [meaningStr] }];
+
+                        // Usamos tu lógica de Okurigana para agrupar distractores
+                        const ending = getOkuriganaEnding(word);
+                        if (!levels[lvlNum][ending]) levels[lvlNum][ending] = [];
+                        
+                        levels[lvlNum][ending].push({
+                            word: word,
+                            reading: reading,
+                            meanings: meaningsObject
+                        });
+                        
+                        totalWordsProcessed++;
                     }
-                    if (minLevel === null) continue;
-
-                    // Incluir el primer significado en la clave única para diferenciar homónimos
-                    let firstGloss = "";
-                    if (entry.meanings && Array.isArray(entry.meanings)) {
-                        for (const m of entry.meanings) {
-                             if (m.glosses && m.glosses.length > 0) {
-                                 firstGloss = m.glosses[0];
-                                 break; 
-                             }
-                        }
-                    }
-
-                    const uniqueKey = `${word}|${reading}|${firstGloss}`;
-                    if (uniqueSet.has(uniqueKey)) continue;
-                    uniqueSet.add(uniqueKey);
-
-                    const ending = getOkuriganaEnding(word);
-                    if (!levels[minLevel][ending]) levels[minLevel][ending] = [];
-                    levels[minLevel][ending].push({
-                        word, reading, meanings: entry.meanings
-                    });
                 }
+                
+                // Actualización visual UI
+                this.loadingMessage = `Procesando vocabulario N${lvlKey}...`;
+                await sleep(10);
             }
+
+            console.log(`Vocabulario total cargado: ${totalWordsProcessed}`);
             this.vocabByLevelCache = levels;
         },
 
@@ -227,7 +236,7 @@ new Vue({
             for (const lvlStr of levels) {
                 const lvlNum = parseInt(lvlStr.replace('jlpt', ''));
                 
-                // Obtener Kanjis
+                // Obtener Kanjis (ahora allKanjiData ya tiene la propiedad .jlpt gracias a loadData)
                 const kanjisInLevel = Object.keys(this.allKanjiData)
                     .filter(k => this.allKanjiData[k].jlpt === lvlNum)
                     .sort();
@@ -239,15 +248,14 @@ new Vue({
                 
                 const numParts = Math.ceil(kanjisInLevel.length / kpp);
                 
-                // Usamos el cache directo
+                // Usamos el cache que llenamos en preloadVocabulary
                 const vocabGroups = this.vocabByLevelCache[lvlNum] || {};
-                let validVocab = [];
                 
-                // Aplanamos solo una vez por nivel
+                // Aplanamos grupos para obtener lista lineal
                 const allWordsInLevel = Object.values(vocabGroups).flat();
                 
-                // Filtramos palabras que tengan suficientes distractores
-                validVocab = allWordsInLevel.filter(w => {
+                // Filtramos palabras que tengan suficientes distractores (Lógica original)
+                const validVocab = allWordsInLevel.filter(w => {
                     const ending = getOkuriganaEnding(w.word);
                     const group = vocabGroups[ending];
                     return group && group.length >= NUM_QUIZ_OPTIONS; 
@@ -354,6 +362,7 @@ new Vue({
                 return {
                     word: w.word,
                     correct_value: w.reading,
+                    // Adaptado al formato simulado en preloadVocabulary: meanings[0].glosses
                     meaning: (w.meanings[0].glosses || []).join(", "),
                     options: shuffleArray(opts)
                 };
