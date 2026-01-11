@@ -43,10 +43,9 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            position: relative; /* Necesario para posicionar el botón absolute */
+            position: relative; 
             padding: 1rem;
-            /* IMPORTANTE: Reservamos espacio abajo para que el botón no tape el texto */
-            padding-bottom: 90px; 
+            padding-bottom: 90px; /* Espacio reservado para el botón Continue */
         }
 
         /* --- BOTÓN CONTINUE INTERNO --- */
@@ -60,7 +59,6 @@
             z-index: 10;
         }
 
-        /* Animación de entrada suave del botón */
         .fade-up-enter {
             animation: fadeUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
@@ -69,13 +67,17 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* --- ÁREA DE OPCIONES --- */
+        /* --- ÁREA DE OPCIONES (SOLUCIÓN BORDE INFERIOR) --- */
         .quiz-options-area {
-            height: 42vh; 
-            min-height: 250px;
-            padding: 0.5rem;
-            background-color: #f1f5f9; /* Un gris apenas diferente para separar zonas */
+            /* Altura fija aproximada para botones grandes */
+            height: 45vh; 
+            min-height: 280px;
+            background-color: #f1f5f9;
             border-top: 1px solid #dee2e6;
+            
+            /* AQUÍ ESTÁ EL ARREGLO DEL MARGEN: */
+            padding: 0.75rem;          /* Espacio a los lados y arriba */
+            padding-bottom: 2.5rem;    /* Espacio EXTRA abajo para la navegación Android/Desktop */
         }
 
         .btn-option {
