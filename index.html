@@ -44,7 +44,8 @@
             justify-content: center;
             align-items: center;
             position: relative; 
-            padding: 1rem;
+            /* Reduje el padding general para dar espacio a las barras */
+            padding: 0.5rem; 
             padding-bottom: 90px; /* Espacio reservado para el botón Continue */
         }
 
@@ -67,17 +68,14 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* --- ÁREA DE OPCIONES (SOLUCIÓN BORDE INFERIOR) --- */
+        /* --- ÁREA DE OPCIONES --- */
         .quiz-options-area {
-            /* Altura fija aproximada para botones grandes */
             height: 45vh; 
             min-height: 280px;
+            padding: 0.5rem;
+            padding-bottom: 2.5rem; /* Margen seguridad Android/iOS */
             background-color: #f1f5f9;
             border-top: 1px solid #dee2e6;
-            
-            /* AQUÍ ESTÁ EL ARREGLO DEL MARGEN: */
-            padding: 0.75rem;          /* Espacio a los lados y arriba */
-            padding-bottom: 2.5rem;    /* Espacio EXTRA abajo para la navegación Android/Desktop */
         }
 
         .btn-option {
@@ -176,23 +174,34 @@
 
             <div v-else class="quiz-fullscreen">
                 
-                <div class="p-3 pb-2 bg-light border-bottom">
+                <div class="px-3 pt-3 pb-2 bg-light border-bottom">
+                    
                     <div class="d-flex align-items-center justify-content-between mb-2">
-                        <button @click="resetToMenu" class="btn btn-light border rounded-circle" style="width: 40px; height: 40px;">
-                            <i class="fas fa-arrow-left text-secondary"></i>
+                        <button @click="resetToMenu" class="btn btn-light border rounded-circle shadow-sm" style="width: 38px; height: 38px;">
+                            <i class="fas fa-arrow-left text-secondary small"></i>
                         </button>
-                        <span class="badge bg-secondary fs-6">
+                        <span class="badge bg-white text-secondary border shadow-sm fw-normal">
                             {{ quizMode === 'kanji' ? 'Kanji' : 'Vocab' }} N{{ selectedLevel.originalLevel.replace('jlpt', '') }}
                         </span>
-                        <div style="width: 40px;"></div>
+                        <div style="width: 38px;"></div>
                     </div>
-                    <div class="row g-2 align-items-center">
+
+                    <div class="row g-3">
                         <div class="col-6">
+                            <div class="d-flex justify-content-between align-items-end mb-1">
+                                <span class="text-muted fw-bold" style="font-size: 0.75rem;">PROGRESS</span>
+                                <span class="text-primary fw-bold small">{{ currentItemOrderIndex + 1 }}/{{ totalItemsInLevel }}</span>
+                            </div>
                             <div class="progress" style="height: 6px;">
                                 <div class="progress-bar bg-primary rounded-pill" :style="{ width: progressPercentage + '%' }"></div>
                             </div>
                         </div>
+                        
                         <div class="col-6">
+                            <div class="d-flex justify-content-between align-items-end mb-1">
+                                <span class="text-muted fw-bold" style="font-size: 0.75rem;">WIN RATE</span>
+                                <span :class="accuracyColorText" class="fw-bold small">{{ currentAccuracy }}%</span>
+                            </div>
                             <div class="progress" style="height: 6px;">
                                 <div class="progress-bar rounded-pill" :class="accuracyColorClass" :style="{ width: currentAccuracy + '%' }"></div>
                             </div>
@@ -202,8 +211,8 @@
 
                 <div class="quiz-question-area bg-white">
                     
-                    <h1 class="display-1 fw-bold mb-0 font-jp text-dark user-select-none" 
-                        style="font-size: clamp(4rem, 12vw, 7rem);">
+                    <h1 class="display-1 fw-bold mb-0 font-jp text-dark user-select-none lh-1" 
+                        style="font-size: clamp(5rem, 15vw, 8rem);">
                         {{ quizMode === 'kanji' ? currentQuestion.kanji : currentQuestion.word }}
                     </h1>
                     
