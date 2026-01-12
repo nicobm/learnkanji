@@ -42,7 +42,6 @@ new Vue({
     data: {
         loadingData: true,
         loadingMessage: "Initializing...",
-        jsonLoadError: null,
         
         allKanjiData: {}, 
         vocabByLevelCache: {}, 
@@ -51,22 +50,27 @@ new Vue({
         quizMode: 'kanji',
         availablePartsRaw: [],
         
+        // Quiz State
         quizQueue: [], 
         currentQuestion: null, 
         options: [],
-        
         currentItemOrderIndex: 0,
         totalItemsInLevel: 1,
         
-        isLoading: false,
+        // Interaction State
         showImmediateCorrectFeedback: false, 
         incorrectlySelectedOptions: [],
+        shakingBtnValue: null,
         
-        completedSessionItems: new Set(),
+        // Stats Logic
         correctCount: 0,
         wrongCount: 0,
         
-        shakingBtnValue: null 
+        // Timing & Session Results
+        showResults: false,
+        questionStartTime: 0,
+        sessionStats: [], // [{key: 'word/kanji', time: ms, wrong: int, meaning: str}]
+        finalStats: { accuracy: 0, totalTime: 0, hardest: [], fastest: [] }
     },
     computed: {
         orderedGroupedParts() {
@@ -85,34 +89,37 @@ new Vue({
         },
         progressPercentage() {
             if (this.totalItemsInLevel === 0) return 0;
+            // Mostramos progreso basado en cuantos ya hemos completado
             return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
         },
-        
         currentAccuracy() {
             if (this.totalItemsInLevel === 0) return 100;
-            
             const wrongOptionsPerQuestion = NUM_QUIZ_OPTIONS - 1;
             const totalLifePoints = this.totalItemsInLevel * wrongOptionsPerQuestion;
-            
             if (totalLifePoints === 0) return 100;
-
             const currentLife = totalLifePoints - this.wrongCount;
             const percentage = (currentLife / totalLifePoints) * 100;
-            
             return Math.max(0, Math.min(100, Math.round(percentage)));
         },
-        
         accuracyColorClass() {
             const acc = this.currentAccuracy;
             if (acc >= 70) return 'bg-success'; 
             if (acc >= 40) return 'bg-warning'; 
             return 'bg-danger';                 
         },
-        accuracyColorText() {
-            const acc = this.currentAccuracy;
-            if (acc >= 70) return 'text-success';
-            if (acc >= 40) return 'text-warning';
-            return 'text-danger';
+        // Calcula dinámicamente el tamaño de la fuente para que no se rompa la UI
+        dynamicFontSize() {
+            if (!this.currentQuestion) return '5rem';
+            const text = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
+            const len = text.length;
+            
+            if (this.quizMode === 'kanji') return 'clamp(5rem, 15vw, 8rem)';
+            
+            // Para vocabulario, escalamos hacia abajo si es largo
+            if (len <= 2) return 'clamp(4rem, 12vw, 6rem)';
+            if (len <= 4) return 'clamp(3rem, 10vw, 4.5rem)';
+            if (len <= 6) return 'clamp(2rem, 8vw, 3.5rem)';
+            return 'clamp(1.5rem, 6vw, 2.5rem)';
         }
     },
     created() {
@@ -148,7 +155,6 @@ new Vue({
                 this.loadingData = false;
             } catch (e) {
                 console.error(e);
-                this.jsonLoadError = e.message;
                 this.loadingData = false;
             }
         },
@@ -222,7 +228,7 @@ new Vue({
                         name: `JLPT N${lvlNum}`,
                         originalLevel: lvlStr,
                         count: kanjisInLevel.slice((i-1)*kpp, i*kpp).length,
-                        kotoba_count: validVocab.slice(startW, startW + wordsPerPart).length,
+                        kotoba_count: validVocab.slice(startW, startW + wordsPerPart).length, // Added Count
                         kanjiList: kanjisInLevel.slice((i-1)*kpp, i*kpp),
                         fullVocabPart: validVocab.slice(startW, startW + wordsPerPart),
                         partNum: i,
@@ -237,7 +243,9 @@ new Vue({
             this.selectedLevel = part;
             this.quizMode = mode;
             this.showImmediateCorrectFeedback = false;
+            this.showResults = false;
             this.incorrectlySelectedOptions = [];
+            this.sessionStats = []; // Reset Stats
             this.correctCount = 0; 
             this.wrongCount = 0;
             
@@ -249,10 +257,8 @@ new Vue({
             const queue = part.kanjiList.map(char => {
                 const d = this.allKanjiData[char];
                 if (!d) return null;
-                
                 const kuns = cleanReadings(d.kun_readings);
                 const ons = cleanReadings(d.on_readings);
-                
                 let corrVal = "", corrType = "", dispComp = "", targetKunLen = 0, targetOnLen = 0;
                 
                 if (kuns.length > 0) {
@@ -333,26 +339,18 @@ new Vue({
                 const kunDiff = Math.abs(dKunLen - targetKunLen);
                 const onDiff = Math.abs(dOnLen - targetOnLen);
 
-                if (kunDiff === 0 && onDiff === 0) {
-                    perfectMatches.push(distObj);
-                } 
-                else if ((type === 'kun' && kunDiff === 0) || (type === 'on' && onDiff === 0)) {
-                    strongMatches.push(distObj);
-                }
-                else if (kunDiff <= 1 || onDiff <= 1) {
-                    looseMatches.push(distObj);
-                }
+                if (kunDiff === 0 && onDiff === 0) perfectMatches.push(distObj);
+                else if ((type === 'kun' && kunDiff === 0) || (type === 'on' && onDiff === 0)) strongMatches.push(distObj);
+                else if (kunDiff <= 1 || onDiff <= 1) looseMatches.push(distObj);
 
                 if (perfectMatches.length >= needed) break;
             }
 
             distractors.push(...perfectMatches);
-            
             if (distractors.length < needed) {
                 const neededStrong = needed - distractors.length;
                 distractors.push(...strongMatches.slice(0, neededStrong));
             }
-            
             if (distractors.length < needed) {
                 const neededLoose = needed - distractors.length;
                 distractors.push(...looseMatches.slice(0, neededLoose));
@@ -376,39 +374,31 @@ new Vue({
                     }
                 }
             }
-            
-            const finalDistractors = distractors.slice(0, needed);
-            return shuffleArray([correctOpt, ...finalDistractors]);
+            return shuffleArray([correctOpt, ...distractors.slice(0, needed)]);
         },
 
         generateVocabQuiz(part) {
             const queue = part.fullVocabPart.map(w => {
                 const ending = getOkuriganaEnding(w.word);
                 const pool = this.vocabByLevelCache[parseInt(part.originalLevel.replace('jlpt',''))][ending] || [];
-                
                 const targetLen = w.reading.length;
                 let validCandidates = pool.filter(x => x.reading !== w.reading);
                 
                 let smartDistractors = validCandidates.filter(x => x.len === targetLen);
-                
                 if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) {
                     const loose = validCandidates.filter(x => Math.abs(x.len - targetLen) === 1);
                     smartDistractors = smartDistractors.concat(loose);
                 }
-                
-                if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) {
-                    smartDistractors = validCandidates; 
-                }
-                
+                if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) smartDistractors = validCandidates; 
                 if (smartDistractors.length < NUM_QUIZ_OPTIONS - 1) return null;
 
                 const selectedDists = shuffleArray(smartDistractors).slice(0, NUM_QUIZ_OPTIONS-1);
-                
                 const opts = [{value: w.reading}, ...selectedDists.map(d => ({value: d.reading}))];
                 
                 return {
                     word: w.word,
                     correct_value: w.reading,
+                    correct_contextual_reading: w.reading, // For consistency in template
                     meaning: (w.meanings[0].glosses || []).join(", "),
                     options: shuffleArray(opts)
                 };
@@ -431,21 +421,36 @@ new Vue({
             this.incorrectlySelectedOptions = [];
             this.currentQuestion = this.quizQueue[idx];
             this.options = this.currentQuestion.options;
+            // Record start time
+            this.questionStartTime = Date.now();
         },
 
         checkAnswer(option) {
             if (this.showImmediateCorrectFeedback) return;
 
             if (option.value === this.currentQuestion.correct_value) {
-                // CORRECTO: Solo cambiamos la bandera, Vue se encarga del CSS
+                // CORRECT
                 this.showImmediateCorrectFeedback = true;
                 this.correctCount++;
+                
+                // Record Stats
+                const timeTaken = Date.now() - this.questionStartTime;
                 const itemKey = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
-                this.completedSessionItems.add(itemKey);
+                const wrongForThis = this.incorrectlySelectedOptions.length;
+                
+                this.sessionStats.push({
+                    key: itemKey,
+                    time: timeTaken,
+                    wrong: wrongForThis,
+                    meaning: this.currentQuestion.meaning
+                });
+
             } else {
-                // INCORRECTO: Shake
-                this.incorrectlySelectedOptions.push(option.value);
-                this.wrongCount++;
+                // WRONG
+                if (!this.incorrectlySelectedOptions.includes(option.value)) {
+                    this.incorrectlySelectedOptions.push(option.value);
+                    this.wrongCount++;
+                }
                 this.shakingBtnValue = option.value;
                 setTimeout(() => { this.shakingBtnValue = null; }, 500);
             }
@@ -456,25 +461,47 @@ new Vue({
                 this.currentItemOrderIndex++;
                 this.loadQuestion(this.currentItemOrderIndex);
             } else {
-                this.resetToMenu();
+                // FIN DE NIVEL: Mostrar resultados
+                this.finishSession();
             }
-        },
-
-        getButtonClass(option) {
-            if (this.showImmediateCorrectFeedback && option.value === this.currentQuestion.correct_value) {
-                return 'btn-success'; // Se mantiene verde
-            }
-            if (this.incorrectlySelectedOptions.includes(option.value)) return 'btn-danger';
-            return 'btn-outline-primary';
         },
         
-        isItemCompleted(key) {
-            return this.completedSessionItems.has(key);
+        // Debug tool
+        forceFinishLevel() {
+            this.finishSession();
+        },
+
+        finishSession() {
+            // Calcular estadísticas
+            const totalTime = this.sessionStats.reduce((acc, curr) => acc + curr.time, 0);
+            const totalSec = Math.floor(totalTime / 1000);
+            
+            // Ordenar por dificultad (más errores primero, luego más tiempo)
+            const hardest = [...this.sessionStats].sort((a, b) => {
+                if (b.wrong !== a.wrong) return b.wrong - a.wrong;
+                return b.time - a.time;
+            }).slice(0, 10); // Top 10 dificiles
+
+            // Ordenar por velocidad (menos tiempo primero, sin errores)
+            const fastest = [...this.sessionStats]
+                .filter(x => x.wrong === 0)
+                .sort((a, b) => a.time - b.time)
+                .slice(0, 5); // Top 5 rápidos
+
+            this.finalStats = {
+                accuracy: this.currentAccuracy,
+                totalTime: totalSec,
+                hardest: hardest,
+                fastest: fastest
+            };
+
+            this.showResults = true;
         },
 
         resetToMenu() {
             this.selectedLevel = null;
             this.currentQuestion = null;
+            this.showResults = false;
         }
     }
 });

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="auto">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -12,97 +12,24 @@
     <style>
         [v-cloak] { display: none !important; }
         
-        /* Base Styles */
         body { 
-            background-color: #f8f9fa; 
-            font-family: system-ui, -apple-system, sans-serif;
-            overflow-y: auto; 
+            /* Evita el rebote en móvil */
             overscroll-behavior-y: none;
+            transition: background-color 0.3s, color 0.3s;
         }
 
         .font-jp { font-family: 'Noto Sans JP', sans-serif; }
 
-        /* --- MODO QUIZ: FULLSCREEN --- */
-        .quiz-fullscreen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #f8f9fa;
-            z-index: 2000;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+        /* Transiciones suaves para elementos de Vue */
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+        .fade-enter, .fade-leave-to { opacity: 0; }
+
+        /* Animación de subida del Kanji */
+        .question-container {
+            transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
         }
 
-        /* --- ÁREA DE PREGUNTA (TARJETA BLANCA) --- */
-        .quiz-question-area {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            position: relative; 
-            /* Reduje el padding general para dar espacio a las barras */
-            padding: 0.5rem; 
-            padding-bottom: 90px; /* Espacio reservado para el botón Continue */
-        }
-
-        /* --- BOTÓN CONTINUE INTERNO --- */
-        .internal-next-btn-container {
-            position: absolute;
-            bottom: 20px;
-            left: 0;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            z-index: 10;
-        }
-
-        .fade-up-enter {
-            animation: fadeUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-        }
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* --- ÁREA DE OPCIONES --- */
-        .quiz-options-area {
-            height: 45vh; 
-            min-height: 280px;
-            padding: 0.5rem;
-            padding-bottom: 2.5rem; /* Margen seguridad Android/iOS */
-            background-color: #f1f5f9;
-            border-top: 1px solid #dee2e6;
-        }
-
-        .btn-option {
-            height: 100%;
-            width: 100%;
-            border-radius: 12px;
-            border: 2px solid #e9ecef;
-            background-color: white;
-            color: #495057;
-            transition: transform 0.1s;
-        }
-        .btn-option:active:not(:disabled) {
-            transform: scale(0.96);
-        }
-
-        .btn-success-custom {
-            background-color: #198754 !important;
-            border-color: #198754 !important;
-            color: white !important;
-        }
-        .btn-danger-custom {
-            background-color: #dc3545 !important;
-            border-color: #dc3545 !important;
-            color: white !important;
-        }
-
-        /* Animaciones */
+        /* Animación Shake para error */
         .shake-animation { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
         @keyframes shake {
             10%, 90% { transform: translate3d(-1px, 0, 0); }
@@ -111,59 +38,87 @@
             40%, 60% { transform: translate3d(4px, 0, 0); }
         }
 
-        .meaning-box {
-            opacity: 0;
-            transition: none;
+        /* Ajustes específicos para que el layout ocupe el 100% sin scroll en modo Quiz */
+        .quiz-layout {
+            height: 100dvh; /* Dynamic Viewport Height para móviles */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
-        .meaning-box.visible {
-            opacity: 1;
-            transition: opacity 0.3s ease-in-out;
+
+        .options-area {
+            height: 40vh;
+            min-height: 250px;
+            flex-shrink: 0;
+        }
+
+        .question-area {
+            flex-grow: 1;
+            position: relative;
+            overflow-y: auto; /* Permitir scroll si la explicación es muy larga */
         }
         
-        @media (min-width: 768px) {
-            .quiz-fullscreen {
-                max-width: 600px;
-                left: 50%;
-                transform: translateX(-50%);
-                border-left: 1px solid #dee2e6;
-                border-right: 1px solid #dee2e6;
-            }
+        /* Resultados Scrollable */
+        .results-area {
+            height: 100dvh;
+            overflow-y: auto;
+        }
+
+        /* Botones de opción */
+        .btn-option {
+            height: 100%;
+            width: 100%;
+            border-width: 2px;
+            transition: transform 0.1s;
+        }
+        .btn-option:active:not(:disabled) { transform: scale(0.96); }
+
+        /* Ajustes Dark Mode automáticos de Bootstrap 5.3 funcionan, 
+           pero forzamos un poco el contraste en los botones outline */
+        [data-bs-theme="dark"] .btn-outline-secondary {
+            color: #adb5bd;
+            border-color: #495057;
         }
     </style>
 </head>
-<body>
+<body class="bg-body text-body">
 
     <div id="app" v-cloak>
         
-        <div v-if="loadingData" class="d-flex flex-column align-items-center justify-content-center vh-100 bg-white">
+        <div v-if="loadingData" class="d-flex flex-column align-items-center justify-content-center vh-100">
             <div class="spinner-border text-primary mb-3" role="status"></div>
-            <h5 class="text-secondary fw-light">{{ loadingMessage }}</h5>
+            <h5 class="text-body-secondary fw-light">{{ loadingMessage }}</h5>
         </div>
 
         <div v-else>
 
-            <div v-if="!selectedLevel" class="container py-4">
+            <div v-if="!selectedLevel && !showResults" class="container py-4">
                 <div class="text-center mb-5">
                     <h1 class="display-5 fw-bold text-primary mb-0">Kanji Master</h1>
-                    <p class="text-muted">Select Level</p>
+                    <p class="text-body-secondary">Select Level</p>
                 </div>
                 
                 <div class="row justify-content-center">
                     <div class="col-12 col-md-8 col-lg-6">
-                        <div v-for="group in orderedGroupedParts" :key="group.levelKey" class="card mb-3 shadow-sm border-0">
-                            <div class="card-header bg-white border-0 pt-3 pb-0">
-                                <h6 class="fw-bold text-secondary text-uppercase small">Level N{{ group.levelKey }}</h6>
+                        <div v-for="group in orderedGroupedParts" :key="group.levelKey" class="card mb-4 shadow-sm border-0 bg-body-tertiary">
+                            <div class="card-header border-0 pt-3 pb-0 bg-transparent">
+                                <h6 class="fw-bold text-body-secondary text-uppercase small">Level N{{ group.levelKey }}</h6>
                             </div>
                             <div class="card-body">
-                                <div class="d-flex flex-wrap gap-2">
-                                    <div v-for="part in group.parts" :key="part.id" class="btn-group shadow-sm">
-                                        <button @click="startLevel(part, 'kanji')" class="btn btn-outline-primary">
-                                            <span class="fw-bold">Part {{ part.partNum }}</span>
-                                            <small class="ms-1 opacity-75">({{ part.count }})</small>
-                                        </button>
-                                        <button @click="startLevel(part, 'kotoba')" class="btn btn-outline-secondary bg-light">
-                                            <i class="fas fa-font"></i>
-                                        </button>
+                                <div class="d-grid gap-3">
+                                    <div v-for="part in group.parts" :key="part.id" class="row g-2">
+                                        <div class="col-7">
+                                            <button @click="startLevel(part, 'kanji')" class="btn btn-outline-primary w-100 h-100 d-flex align-items-center justify-content-between px-3">
+                                                <span class="fw-bold">Part {{ part.partNum }} <small class="fw-normal opacity-75">(Kanji)</small></span>
+                                                <span class="badge text-bg-primary rounded-pill">{{ part.count }}</span>
+                                            </button>
+                                        </div>
+                                        <div class="col-5">
+                                            <button @click="startLevel(part, 'kotoba')" class="btn btn-outline-secondary w-100 h-100 d-flex align-items-center justify-content-between px-3">
+                                                <span><i class="fas fa-font me-1"></i> Vocab</span>
+                                                <span class="badge text-bg-secondary rounded-pill">{{ part.kotoba_count }}</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -172,36 +127,91 @@
                 </div>
             </div>
 
-            <div v-else class="quiz-fullscreen">
-                
-                <div class="px-3 pt-3 pb-2 bg-light border-bottom">
-                    
-                    <div class="d-flex align-items-center justify-content-between mb-2">
-                        <button @click="resetToMenu" class="btn btn-light border rounded-circle shadow-sm" style="width: 38px; height: 38px;">
-                            <i class="fas fa-arrow-left text-secondary small"></i>
+            <div v-else-if="showResults" class="results-area bg-body">
+                <div class="container py-5">
+                    <div class="text-center mb-5">
+                        <h1 class="display-4 fw-bold text-primary">Session Complete!</h1>
+                        <p class="lead text-body-secondary">Here is how you performed.</p>
+                        <button @click="resetToMenu" class="btn btn-primary btn-lg rounded-pill px-5 shadow">
+                            Back to Menu
                         </button>
-                        <span class="badge bg-white text-secondary border shadow-sm fw-normal">
+                    </div>
+
+                    <div class="row g-4 justify-content-center">
+                        <div class="col-12 col-md-8">
+                            <div class="card shadow-sm border-0 bg-body-tertiary mb-4">
+                                <div class="card-body d-flex justify-content-around text-center py-4">
+                                    <div>
+                                        <h3 class="fw-bold text-success">{{ finalStats.accuracy }}%</h3>
+                                        <small class="text-uppercase text-body-secondary fw-bold" style="font-size: 0.7rem;">Accuracy</small>
+                                    </div>
+                                    <div>
+                                        <h3 class="fw-bold">{{ finalStats.totalTime }}s</h3>
+                                        <small class="text-uppercase text-body-secondary fw-bold" style="font-size: 0.7rem;">Total Time</small>
+                                    </div>
+                                    <div>
+                                        <h3 class="fw-bold text-danger">{{ wrongCount }}</h3>
+                                        <small class="text-uppercase text-body-secondary fw-bold" style="font-size: 0.7rem;">Mistakes</small>
+                                    </div>
+                                </div>
+                            </div>
+                        
+                            <h5 class="fw-bold text-body mb-3"><i class="fas fa-fire text-danger me-2"></i>Toughest Items</h5>
+                            <ul class="list-group shadow-sm mb-4">
+                                <li v-for="item in finalStats.hardest" :key="item.key" class="list-group-item d-flex justify-content-between align-items-center bg-body-tertiary border-0 mb-1 rounded">
+                                    <div>
+                                        <span class="fs-4 fw-bold font-jp me-3">{{ item.key }}</span>
+                                        <span class="text-body-secondary small">{{ item.meaning }}</span>
+                                    </div>
+                                    <div class="text-end">
+                                        <span v-if="item.wrong > 0" class="badge text-bg-danger me-1">{{ item.wrong }} miss</span>
+                                        <span class="badge text-bg-secondary">{{ (item.time/1000).toFixed(1) }}s</span>
+                                    </div>
+                                </li>
+                                <li v-if="finalStats.hardest.length === 0" class="list-group-item bg-transparent text-center text-muted border-0">
+                                    Perfect run! Nothing seemed hard.
+                                </li>
+                            </ul>
+
+                            <h5 class="fw-bold text-body mb-3"><i class="fas fa-bolt text-warning me-2"></i>Speedy Answers</h5>
+                            <ul class="list-group shadow-sm">
+                                <li v-for="item in finalStats.fastest" :key="item.key" class="list-group-item d-flex justify-content-between align-items-center bg-body-tertiary border-0 mb-1 rounded">
+                                    <div>
+                                        <span class="fs-4 fw-bold font-jp me-3">{{ item.key }}</span>
+                                    </div>
+                                    <span class="badge text-bg-success">{{ (item.time/1000).toFixed(1) }}s</span>
+                                </li>
+                            </ul>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-else class="quiz-layout bg-body">
+                
+                <div class="px-3 pt-3 pb-2 bg-body-tertiary border-bottom sticky-top">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <button @click="resetToMenu" class="btn btn-sm btn-outline-secondary rounded-circle shadow-sm" style="width: 32px; height: 32px;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        
+                        <span class="badge bg-body border text-body fw-normal shadow-sm">
                             {{ quizMode === 'kanji' ? 'Kanji' : 'Vocab' }} N{{ selectedLevel.originalLevel.replace('jlpt', '') }}
                         </span>
-                        <div style="width: 38px;"></div>
+
+                        <button @click="forceFinishLevel" class="btn btn-sm btn-outline-danger opacity-25" style="font-size: 0.6rem;">
+                            FIN
+                        </button>
                     </div>
 
                     <div class="row g-3">
                         <div class="col-6">
-                            <div class="d-flex justify-content-between align-items-end mb-1">
-                                <span class="text-muted fw-bold" style="font-size: 0.75rem;">PROGRESS</span>
-                                <span class="text-primary fw-bold small">{{ currentItemOrderIndex + 1 }}/{{ totalItemsInLevel }}</span>
-                            </div>
                             <div class="progress" style="height: 6px;">
                                 <div class="progress-bar bg-primary rounded-pill" :style="{ width: progressPercentage + '%' }"></div>
                             </div>
                         </div>
-                        
                         <div class="col-6">
-                            <div class="d-flex justify-content-between align-items-end mb-1">
-                                <span class="text-muted fw-bold" style="font-size: 0.75rem;">WIN RATE</span>
-                                <span :class="accuracyColorText" class="fw-bold small">{{ currentAccuracy }}%</span>
-                            </div>
                             <div class="progress" style="height: 6px;">
                                 <div class="progress-bar rounded-pill" :class="accuracyColorClass" :style="{ width: currentAccuracy + '%' }"></div>
                             </div>
@@ -209,50 +219,49 @@
                     </div>
                 </div>
 
-                <div class="quiz-question-area bg-white">
+                <div class="question-area d-flex flex-column">
                     
-                    <h1 class="display-1 fw-bold mb-0 font-jp text-dark user-select-none lh-1" 
-                        style="font-size: clamp(5rem, 15vw, 8rem);">
-                        {{ quizMode === 'kanji' ? currentQuestion.kanji : currentQuestion.word }}
-                    </h1>
-                    
-                    <div class="mt-3 px-3 d-flex flex-column align-items-center justify-content-center text-center meaning-box"
-                         style="min-height: 4rem;"
-                         :class="{ 'visible': showImmediateCorrectFeedback }">
-                        <h3 class="text-primary fw-normal mb-1">{{ currentMeaning }}</h3>
-                        <div v-if="currentQuestion.correct_contextual_reading" class="text-muted fs-5 font-jp mt-1">
-                            {{ currentQuestion.correct_contextual_reading }}
+                    <div class="question-container d-flex flex-column flex-grow-1 px-3"
+                         :class="showImmediateCorrectFeedback ? 'justify-content-start pt-5' : 'justify-content-center'">
+                        
+                        <div class="text-center">
+                            <h1 class="fw-bold mb-0 font-jp user-select-none lh-1 text-body-emphasis" 
+                                :style="{ fontSize: dynamicFontSize }">
+                                {{ quizMode === 'kanji' ? currentQuestion.kanji : currentQuestion.word }}
+                            </h1>
+                            
+                            <div class="mt-4 fade-enter-active" v-if="showImmediateCorrectFeedback">
+                                <h3 class="text-primary fw-normal mb-2">{{ currentMeaning }}</h3>
+                                <div class="text-body-secondary fs-4 font-jp mb-4">
+                                    {{ currentQuestion.correct_contextual_reading }}
+                                </div>
+                                
+                                <button @click="nextQuestion" class="btn btn-success btn-lg rounded-pill px-5 fw-bold shadow-lg animate-up">
+                                    Continue <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
-
-                    <div v-if="showImmediateCorrectFeedback" class="internal-next-btn-container fade-up-enter">
-                        <button @click="nextQuestion" class="btn btn-success btn-lg rounded-pill px-5 fw-bold shadow">
-                            Continue <i class="fas fa-arrow-right ms-2"></i>
-                        </button>
-                    </div>
-
                 </div>
 
-                <div class="quiz-options-area">
+                <div class="options-area bg-body-tertiary border-top p-2 pb-4">
                     <div class="container-fluid h-100 p-0">
-                        <div class="row h-100 g-2 row-cols-2">
+                        <div v-if="!showImmediateCorrectFeedback" class="row h-100 g-2 row-cols-2">
                             <div class="col" style="height: 33.33%;" v-for="option in options" :key="option.value">
                                 <button @click="checkAnswer(option)" 
-                                        class="btn-option d-flex flex-column justify-content-center align-items-center shadow-sm"
+                                        class="btn btn-option d-flex flex-column justify-content-center align-items-center shadow-sm"
                                         :class="[
                                             { 'shake-animation': shakingBtnValue === option.value },
-                                            (showImmediateCorrectFeedback && option.value === currentQuestion.correct_value) 
-                                                ? 'btn-success-custom' 
-                                                : (incorrectlySelectedOptions.includes(option.value) ? 'btn-danger-custom' : '')
+                                            incorrectlySelectedOptions.includes(option.value) ? 'btn-danger text-white border-danger' : 'btn-outline-primary bg-body text-body-emphasis'
                                         ]"
-                                        :disabled="showImmediateCorrectFeedback || incorrectlySelectedOptions.includes(option.value)">
+                                        :disabled="incorrectlySelectedOptions.includes(option.value)">
                                     
                                     <template v-if="quizMode === 'kanji'">
                                         <span class="fs-2 fw-bold font-jp mb-0 lh-1">{{ option.display_kun }}</span>
                                         <span class="small font-jp opacity-75 mt-1 text-truncate w-100 text-center">{{ option.display_on_kata }}</span>
                                     </template>
                                     <template v-else>
-                                        <span class="fs-5 fw-bold font-jp lh-sm text-break">{{ option.value }}</span>
+                                        <span class="fw-bold font-jp lh-sm text-break" style="font-size: 1.1rem;">{{ option.value }}</span>
                                     </template>
                                 </button>
                             </div>
@@ -267,5 +276,17 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="script.js"></script>
+    
+    <script>
+        // Dark Mode Detection Script
+        (function() {
+            const updateTheme = () => {
+                const colorMode = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+                document.documentElement.setAttribute("data-bs-theme", colorMode);
+            };
+            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", updateTheme);
+            updateTheme();
+        })();
+    </script>
 </body>
 </html>
