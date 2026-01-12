@@ -69,7 +69,7 @@ new Vue({
         // Timing & Session Results
         showResults: false,
         questionStartTime: 0,
-        sessionStats: [], // [{key: 'word/kanji', time: ms, wrong: int, meaning: str}]
+        sessionStats: [], 
         finalStats: { accuracy: 0, totalTime: 0, hardest: [], fastest: [] }
     },
     computed: {
@@ -89,7 +89,6 @@ new Vue({
         },
         progressPercentage() {
             if (this.totalItemsInLevel === 0) return 0;
-            // Mostramos progreso basado en cuantos ya hemos completado
             return ((this.currentItemOrderIndex) / this.totalItemsInLevel) * 100;
         },
         currentAccuracy() {
@@ -104,10 +103,15 @@ new Vue({
         accuracyColorClass() {
             const acc = this.currentAccuracy;
             if (acc >= 70) return 'bg-success'; 
-            if (acc >= 40) return 'bg-warning'; 
+            if (acc >= 40) return 'bg-yellow-400'; 
             return 'bg-danger';                 
         },
-        // Calcula dinámicamente el tamaño de la fuente para que no se rompa la UI
+        accuracyTextColor() {
+            const acc = this.currentAccuracy;
+            if (acc >= 70) return 'text-success'; 
+            if (acc >= 40) return 'text-yellow-500'; 
+            return 'text-danger';  
+        },
         dynamicFontSize() {
             if (!this.currentQuestion) return '5rem';
             const text = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
@@ -115,7 +119,6 @@ new Vue({
             
             if (this.quizMode === 'kanji') return 'clamp(5rem, 15vw, 8rem)';
             
-            // Para vocabulario, escalamos hacia abajo si es largo
             if (len <= 2) return 'clamp(4rem, 12vw, 6rem)';
             if (len <= 4) return 'clamp(3rem, 10vw, 4.5rem)';
             if (len <= 6) return 'clamp(2rem, 8vw, 3.5rem)';
@@ -228,7 +231,7 @@ new Vue({
                         name: `JLPT N${lvlNum}`,
                         originalLevel: lvlStr,
                         count: kanjisInLevel.slice((i-1)*kpp, i*kpp).length,
-                        kotoba_count: validVocab.slice(startW, startW + wordsPerPart).length, // Added Count
+                        kotoba_count: validVocab.slice(startW, startW + wordsPerPart).length,
                         kanjiList: kanjisInLevel.slice((i-1)*kpp, i*kpp),
                         fullVocabPart: validVocab.slice(startW, startW + wordsPerPart),
                         partNum: i,
@@ -245,7 +248,7 @@ new Vue({
             this.showImmediateCorrectFeedback = false;
             this.showResults = false;
             this.incorrectlySelectedOptions = [];
-            this.sessionStats = []; // Reset Stats
+            this.sessionStats = []; 
             this.correctCount = 0; 
             this.wrongCount = 0;
             
@@ -398,7 +401,7 @@ new Vue({
                 return {
                     word: w.word,
                     correct_value: w.reading,
-                    correct_contextual_reading: w.reading, // For consistency in template
+                    correct_contextual_reading: w.reading,
                     meaning: (w.meanings[0].glosses || []).join(", "),
                     options: shuffleArray(opts)
                 };
@@ -421,19 +424,44 @@ new Vue({
             this.incorrectlySelectedOptions = [];
             this.currentQuestion = this.quizQueue[idx];
             this.options = this.currentQuestion.options;
-            // Record start time
             this.questionStartTime = Date.now();
+        },
+        
+        getOptionClass(option) {
+            const isSelectedWrong = this.incorrectlySelectedOptions.includes(option.value);
+            const isCorrect = option.value === this.currentQuestion.correct_value;
+            const isShaking = this.shakingBtnValue === option.value;
+            
+            let classes = [];
+            
+            if (isShaking) classes.push('shake-animation');
+            
+            if (this.showImmediateCorrectFeedback) {
+                if (isCorrect) {
+                    classes.push('bg-success text-white border-success');
+                } else if (isSelectedWrong) {
+                    classes.push('bg-danger text-white border-danger opacity-50');
+                } else {
+                    classes.push('bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600');
+                }
+            } else {
+                if (isSelectedWrong) {
+                    classes.push('bg-danger text-white border-danger');
+                } else {
+                    classes.push('bg-white dark:bg-darkcard text-gray-800 dark:text-gray-200 border-primary hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-95');
+                }
+            }
+            
+            return classes.join(' ');
         },
 
         checkAnswer(option) {
             if (this.showImmediateCorrectFeedback) return;
 
             if (option.value === this.currentQuestion.correct_value) {
-                // CORRECT
                 this.showImmediateCorrectFeedback = true;
                 this.correctCount++;
                 
-                // Record Stats
                 const timeTaken = Date.now() - this.questionStartTime;
                 const itemKey = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
                 const wrongForThis = this.incorrectlySelectedOptions.length;
@@ -446,7 +474,6 @@ new Vue({
                 });
 
             } else {
-                // WRONG
                 if (!this.incorrectlySelectedOptions.includes(option.value)) {
                     this.incorrectlySelectedOptions.push(option.value);
                     this.wrongCount++;
@@ -461,32 +488,23 @@ new Vue({
                 this.currentItemOrderIndex++;
                 this.loadQuestion(this.currentItemOrderIndex);
             } else {
-                // FIN DE NIVEL: Mostrar resultados
                 this.finishSession();
             }
         },
         
-        // Debug tool
-        forceFinishLevel() {
-            this.finishSession();
-        },
-
         finishSession() {
-            // Calcular estadísticas
             const totalTime = this.sessionStats.reduce((acc, curr) => acc + curr.time, 0);
             const totalSec = Math.floor(totalTime / 1000);
             
-            // Ordenar por dificultad (más errores primero, luego más tiempo)
             const hardest = [...this.sessionStats].sort((a, b) => {
                 if (b.wrong !== a.wrong) return b.wrong - a.wrong;
                 return b.time - a.time;
-            }).slice(0, 10); // Top 10 dificiles
+            }).slice(0, 10); 
 
-            // Ordenar por velocidad (menos tiempo primero, sin errores)
             const fastest = [...this.sessionStats]
                 .filter(x => x.wrong === 0)
                 .sort((a, b) => a.time - b.time)
-                .slice(0, 5); // Top 5 rápidos
+                .slice(0, 5); 
 
             this.finalStats = {
                 accuracy: this.currentAccuracy,
