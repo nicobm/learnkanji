@@ -1,3 +1,32 @@
+/*
+    KANJI MASTER JS - LOGIC CORE
+    
+    Resumen de Funcionalidad:
+    Esta aplicación gestiona la lógica de aprendizaje de Kanji y Vocabulario.
+    
+    Conceptos Clave:
+    1. Smart Distractors (Engaño Inteligente): 
+       La aplicación NO elige respuestas al azar. Busca activamente confundir al usuario
+       seleccionando opciones que se parecen a la respuesta correcta (misma longitud, 
+       primeros caracteres similares, o lecturas alternativas del mismo Kanji).
+       Esto fuerza al usuario a reconocer realmente el caracter, no solo a adivinar por descarte.
+    
+    2. Progresión JLPT:
+       Los datos se cargan desde un JSON externo y se agrupan dinámicamente en "Partes" 
+       manejables (aprox 45 items) basadas en niveles JLPT (N5 a N1).
+    
+    3. Game Loop:
+       - Estado 'Pregunta': Muestra Kanji/Palabra gigante.
+       - Interacción: El usuario toca una opción.
+         - Incorrecto: El botón vibra (animación Tailwind), se marca rojo, vida baja.
+         - Correcto: Feedback inmediato visual, transición de pantalla (animación suave hacia arriba), 
+           se muestra lectura y significado.
+    
+    4. Manejo de Estado:
+       Vue.js controla reactivamente toda la UI. No hay manipulación directa del DOM fuera de Vue.
+       El cálculo de estadísticas (Accuracy/Hardest/Fastest) se realiza al final de la sesión.
+*/
+
 // Configuration Constants
 const MAX_KANJI_PER_PART_DEFAULT = 45;
 const TARGET_PARTS_JLPT_N1 = 9;
@@ -113,7 +142,14 @@ new Vue({
             return 'text-danger';  
         },
         dynamicFontSize() {
+            // Ajuste dinámico de fuente para asegurar que encaje en pantalla sin scroll
             if (!this.currentQuestion) return '5rem';
+            
+            // Si ya se respondió correctamente, reducimos drásticamente el tamaño (animación)
+            if (this.showImmediateCorrectFeedback) {
+                return '4rem'; 
+            }
+
             const text = this.quizMode === 'kanji' ? this.currentQuestion.kanji : this.currentQuestion.word;
             const len = text.length;
             
@@ -432,9 +468,10 @@ new Vue({
             const isCorrect = option.value === this.currentQuestion.correct_value;
             const isShaking = this.shakingBtnValue === option.value;
             
+            // Usamos animate-shake definido en tailwind config
             let classes = [];
             
-            if (isShaking) classes.push('shake-animation');
+            if (isShaking) classes.push('animate-shake');
             
             if (this.showImmediateCorrectFeedback) {
                 if (isCorrect) {
@@ -448,7 +485,8 @@ new Vue({
                 if (isSelectedWrong) {
                     classes.push('bg-danger text-white border-danger');
                 } else {
-                    classes.push('bg-white dark:bg-darkcard text-gray-800 dark:text-gray-200 border-primary hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-95');
+                    // Estado Normal: Borde gris (gray-300 / dark:gray-600)
+                    classes.push('bg-white dark:bg-darkcard text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700');
                 }
             }
             
